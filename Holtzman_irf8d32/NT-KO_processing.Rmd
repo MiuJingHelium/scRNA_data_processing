@@ -1,0 +1,205 @@
+---
+title: "NT-KO processing"
+output: html_document
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony)
+library(DoubletFinder)
+library(miQC)
+library(SoupX)
+library(data.table)
+library(SeuratWrappers) #For miQC
+```
+# QC and Preprocessing
+
+## compare with soupX and without soupX
+
+```{r}
+indir = "./" #Can be made into a command-line input
+outdir = "./R_outs/"
+sample = "SR003099_NT-KO"
+```
+
+### SoupX
+```{r load data for soupX}
+toc <- Seurat::Read10X(paste(indir,"/", sample, "/outs/per_sample_outs/count/sample_filtered_feature_bc_matrix", sep = ""))
+tod <- Seurat::Read10X(paste(indir,"/", sample, "/outs/multi/count/raw_feature_bc_matrix", sep = ""))
+meta <- fread(paste(indir, "/",sample, "/outs/per_sample_outs/count/analysis/clustering/gene_expression_graphclust/clusters.csv", sep = ""))
+```
+
+
+```{r prep and run SoupX}
+#prep clusterinfo
+clusters <- meta$Cluster
+names(clusters) <- meta$Barcode
+
+sc <- SoupChannel(tod, toc, calcSoupProfile = FALSE)
+sc <- setClusters(sc, clusters)
+sc <- estimateSoup(sc)
+sc <- autoEstCont(sc)
+out <- adjustCounts(sc)
+
+rm(toc)
+rm(tod)
+rm(meta)
+gc()
+```
+
+
+```{r create Seurat objects for soupX and non-soupX version}
+soupRemoved <- CreateSeuratObject(out) 
+nonRemoved <- CreateSeuratObject(Seurat::Read10X(paste(indir,"/", sample, "/outs/per_sample_outs/count/sample_filtered_feature_bc_matrix", sep = "")))
+
+```
+
+```{r check cell num}
+paste0("number of cells from soup removed is :", ncol(soupRemoved[["RNA"]]$counts))
+paste0("number of genes from soup removed is :", nrow(soupRemoved[["RNA"]]$counts))
+paste0("number of cells from cellranger filterd is :", ncol(nonRemoved[["RNA"]]$counts))
+paste0("number of genes from cellranger filterd is :", nrow(nonRemoved[["RNA"]]$counts))
+```
+
+Decision: we don't need soupX.
+
+### Visualization of some metrics
+
+```{r}
+#mt.percent
+soupRemoved[["percent.mt"]] = PercentageFeatureSet(object = soupRemoved, pattern = "^MT-|^mt-")
+nonRemoved[["percent.mt"]] = PercentageFeatureSet(object = nonRemoved, pattern = "^MT-|^mt-")
+#log10nFeat
+soupRemoved$nFeature_RNA_log10 <- log10(soupRemoved$nFeature_RNA)
+nonRemoved$nFeature_RNA_log10 <- log10(nonRemoved$nFeature_RNA)
+
+#log10nCount
+soupRemoved$nCount_RNA_log10 <- log10(soupRemoved$nCount_RNA)
+nonRemoved$nCount_RNA_log10 <- log10(nonRemoved$nCount_RNA)
+```
+
+```{r feature scatter}
+FeatureScatter(soupRemoved, feature1 = "nFeature_RNA_log10", feature2 = "percent.mt")+
+  ggtitle("SoupX removed")
+FeatureScatter(nonRemoved, feature1 = "nFeature_RNA_log10", feature2 = "percent.mt")+
+  ggtitle("CellRanger filtered")
+```
+```{r}
+FeatureScatter(soupRemoved, feature1 = "nFeature_RNA", feature2 = "percent.mt")+
+    ggtitle("SoupX removed")
+FeatureScatter(nonRemoved, feature1 = "nFeature_RNA", feature2 = "percent.mt")+
+    ggtitle("CellRanger filtered")
+```
+
+```{r}
+
+```
+
+
+
+### miQC
+
+
+
+```{r} 
+soupRemoved <- RunMiQC(soupRemoved, percent.mt = "percent.mt", nFeature_RNA = "nFeature_RNA", posterior.cutoff = 0.8,
+               model.slot = "flexmix_model")
+PlotMiQC(soupRemoved, color.by = "miQC.probability") + ggplot2::scale_color_gradient(low = "grey", high = "purple")
+PlotMiQC(soupRemoved, color.by = "miQC.keep")
+```
+
+```{r}
+nonRemoved <- RunMiQC(nonRemoved, percent.mt = "percent.mt", nFeature_RNA = "nFeature_RNA", posterior.cutoff = 0.8,
+               model.slot = "flexmix_model")
+PlotMiQC(nonRemoved, color.by = "miQC.probability") + ggplot2::scale_color_gradient(low = "grey", high = "purple")
+PlotMiQC(nonRemoved, color.by = "miQC.keep")
+```
+
+```{r}
+table(soupRemoved$miQC.keep)
+```
+
+
+
+```{r}
+table(nonRemoved$miQC.keep)
+```
+
+trim and runmiQC:
+
+```{r}
+soupRemoved <- subset(soupRemoved, subset = percent.mt < 30 & nFeature_RNA_log10 > 2) #eye-balled
+nonRemoved <- subset(nonRemoved, subset = percent.mt < 30 & nFeature_RNA_log10 > 2)
+```
+
+```{r}
+nonRemoved <- RunMiQC(nonRemoved, percent.mt = "percent.mt", nFeature_RNA = "nFeature_RNA", posterior.cutoff = 0.8,
+               model.slot = "flexmix_model")
+PlotMiQC(nonRemoved, color.by = "miQC.probability") + ggplot2::scale_color_gradient(low = "grey", high = "purple")
+PlotMiQC(nonRemoved, color.by = "miQC.keep")
+```
+```{r}
+table(nonRemoved$miQC.keep)
+```
+
+
+
+
+```{r simple hist}
+ggplot(soupRemoved@meta.data)+
+  geom_histogram(aes(x=percent.mt,y = after_stat(width*density*100)),bins = 100)+
+  facet_wrap(vars(orig.ident),ncol=1)+
+  geom_vline(xintercept = 10,col="red") +
+  ylab("proportion")+
+  xlab("percentage of mitochondrial RNA")+
+  ggtitle("soupRemoved")
+
+ggplot(nonRemoved@meta.data)+
+  geom_histogram(aes(x=percent.mt,y = after_stat(width*density*100)),bins = 100)+
+  facet_wrap(vars(orig.ident),ncol=1)+
+  geom_vline(xintercept = 10,col="red") +
+  ylab("proportion")+
+  xlab("percentage of mitochondrial RNA")+
+  ggtitle("CellRanger filtered")
+```
+
+
+```{r simple hist}
+ggplot(soupRemoved@meta.data)+
+  geom_histogram(aes(x=nCount_RNA_log10,y = after_stat(width*density*100)),bins = 100)+
+  facet_wrap(vars(orig.ident),ncol=1)+
+  geom_vline(xintercept = 5,col="red") +
+  ylab("proportion")+
+  xlab("log10 nUMI")+
+  ggtitle("soupRemoved")
+
+ggplot(nonRemoved@meta.data)+
+  geom_histogram(aes(x=nCount_RNA_log10,y = after_stat(width*density*100)),bins = 100)+
+  facet_wrap(vars(orig.ident),ncol=1)+
+  geom_vline(xintercept = 5,col="red") +
+  ylab("proportion")+
+  xlab("log10 nUMI")+
+  ggtitle("CellRanger filtered")
+
+ggplot(soupRemoved@meta.data)+
+  geom_histogram(aes(x=nFeature_RNA_log10,y = after_stat(width*density*100)),bins = 100)+
+  facet_wrap(vars(orig.ident),ncol=1)+
+  geom_vline(xintercept = 4,col="red") +
+  ylab("proportion")+
+  xlab("log10 nFeature")+
+  ggtitle("soupRemoved")
+
+ggplot(nonRemoved@meta.data)+
+  geom_histogram(aes(x=nFeature_RNA_log10,y = after_stat(width*density*100)),bins = 100)+
+  facet_wrap(vars(orig.ident),ncol=1)+
+  geom_vline(xintercept = 4,col="red") +
+  ylab("proportion")+
+  xlab("log10 nFeature")+
+  ggtitle("CellRanger filtered")
+```
+
+
+
+
+
