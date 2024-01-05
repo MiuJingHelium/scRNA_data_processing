@@ -1,0 +1,15 @@
+---
+title: "check_merged"
+output: html_document
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony)
+```
+
+```{r}
+load("outs/R_outs/seurat_objects/S0162_seurat.rds")
+```
+
