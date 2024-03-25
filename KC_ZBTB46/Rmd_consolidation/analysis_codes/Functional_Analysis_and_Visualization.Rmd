@@ -1,0 +1,1401 @@
+---
+title: "Functional Analysis and Visualization"
+output: html_document
+date: "2024-03-07"
+---
+
+I decided to move everything for functional analysis to a separate file because it takes much for efforts to complete
+
+```{r}
+library(msigdbr)
+library(fgsea)
+library(org.Mm.eg.db)
+library(clusterProfiler)
+library(Seurat) # youb know why
+library(tidyverse) # base package for data organization and plotting
+library(RColorBrewer) # for making palettes
+library(gridExtra) # for arranging multiple plots
+library(data.table) # well...
+```
+
+# Prepare Gene Sets
+
+```{r}
+load("Gene_sets/mouse_H_v5p2.rdata") # Mm.H
+load("Gene_sets/mouse_c2_v5p2.rdata") # Mm.c2
+load("Gene_sets/mouse_c5_v5p2.rdata") # Mm.c5
+```
+
+
+```{r}
+H_df<- msigdbr(species = "Mus musculus", category = "H")
+Imm_df <- msigdbr(species = "Mus musculus", category = "C7",subcategory = "IMMUNESIGDB")
+Celltype_df <- msigdbr(species = "Mus musculus", category = "C8")
+C2_KEGG <- msigdbr(species = "Mus musculus", category = "C2",subcategory = "CP:KEGG")
+C2_React <- msigdbr(species = "Mus musculus", category = "C2",subcategory = "CP:REACTOME")
+
+fgsea_sets_Hallmark <- H_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_Imm <- Imm_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_KEGG <- C2_KEGG %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_REACT <- C2_React %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_Celltype <- Celltype_df %>% split(x = .$gene_symbol, f = .$gs_name)
+# Doublecheck helper function
+
+```
+
+
+
+
+# Subset 1 lymphoids (Fig 2)
+
+
+### GSEA
+
+```{r}
+fgsea_res <- function(cell_type_vector, DE_genes, choose_n = 100, choose_tops = F,gene_set = fgsea_sets_Hallmark,mode = "combined"){
+  fgsea_res <- list()
+  #DE_selected <- DE_genes %>% group_by(cluster) %>% filter(p_val_adj < 0.05 & abs(avg_log2FC) > 1 & pct.1 > 0.1) %>% mutate(metric = sign(avg_log2FC)*(-log10(p_val_adj))) %>% filter(!is.infinite(metric))
+  DE_selected <- DE_genes %>% mutate(metric = sign(avg_log2FC)*(-log10(p_val_adj))) %>% filter(!is.infinite(metric))
+  if (mode == "simple"){
+    DE_selected <- DE_genes %>% mutate(metric = avg_log2FC) %>% filter(!is.infinite(metric))
+  }
+  for (i in cell_type_vector) {
+    DE <- DE_selected[DE_selected$cluster == i,] %>% arrange(desc(metric)) %>% select(gene,metric)
+    if (choose_tops){
+      DE_top <- DE %>% group_by(cluster) %>% slice_max(order_by = metric, n = choose_n)
+      DE_tail <- DE %>% group_by(cluster) %>% slice_min(order_by = metric, n = choose_n)
+      DE <- rbind(DE_top,DE_tail)
+    }
+    DE <- DE %>% arrange(desc(metric)) %>% select(gene,metric)
+    rankings <- DE$metric
+    names(rankings) <- DE$gene
+    #print(rankings)
+    plot(rankings)
+    fgseaRes <- fgsea(gene_set, stats = rankings,nPermSimple = 10000)
+    fgseaResTidy <- fgseaRes %>%
+      as_tibble() %>% filter(padj < 0.05 ) %>%
+      arrange(desc(NES))
+  fgsea_res[[i]] <- fgseaResTidy
+  fwrite(fgseaResTidy, file=paste0(i,"_fgsea.tsv"), sep="\t", sep2=c("", " ", ""))
+  }
+   return(fgsea_res)
+}
+```
+
+
+#### Try split into T cells and NK
+
+##### GSEA NK
+
+```{r}
+NK_fgsea_hallmark <- fgsea_res(as.character(unique(NK_markers$cluster)),NK_markers,mode = "simple")
+```
+
+```{r}
+NK_fgsea_react <- fgsea_res(as.character(unique(NK_markers$cluster)),NK_markers,gene_set = fgsea_sets_REACT,mode = "simple")
+```
+
+```{r}
+NK_fgsea_KEGG <- fgsea_res(as.character(unique(NK_markers$cluster)),NK_markers,gene_set = fgsea_sets_KEGG,mode = "simple")
+```
+
+```{r}
+NK_fgsea_Imm <- fgsea_res(as.character(unique(NK_markers$cluster)),NK_markers,gene_set = fgsea_sets_Imm,mode = "simple")
+```
+
+```{r}
+NK_fgsea_CT <- fgsea_res(as.character(unique(NK_markers$cluster)),NK_markers,gene_set = fgsea_sets_Celltype,mode = "simple")
+```
+
+
+
+
+##### GSEA T cells
+
+```{r}
+T_fgsea_hallmark <- fgsea_res(as.character(unique(T_cell_markers$cluster)),T_cell_markers,mode = "simple")
+```
+
+```{r}
+T_fgsea_react <- fgsea_res(as.character(unique(T_cell_markers$cluster)),T_cell_markers,gene_set = fgsea_sets_REACT,mode = "simple")
+```
+
+```{r}
+T_fgsea_KEGG <- fgsea_res(as.character(unique(T_cell_markers$cluster)),T_cell_markers,gene_set = fgsea_sets_KEGG,mode = "simple")
+```
+
+```{r}
+T_fgsea_Imm <- fgsea_res(as.character(unique(T_cell_markers$cluster)),T_cell_markers,gene_set = fgsea_sets_Imm,mode = "simple")
+```
+
+
+```{r}
+T_fgsea_CT <- fgsea_res(as.character(unique(T_cell_markers$cluster)),T_cell_markers,gene_set = fgsea_sets_Celltype,mode = "simple")
+```
+
+
+### create heatmap for T cells
+
+```{r}
+Hallmark_vector <- c("HALLMARK_INTERFERON_GAMMA_RESPONSE","HALLMARK_INTERFERON_ALPHA_RESPONSE","HALLMARK_G2M_CHECKPOINT","HALLMARK_MTORC1_SIGNALING","HALLMARK_OXIDATIVE_PHOSPHORYLATION","HALLMARK_MYC_TARGETS_V1")
+```
+
+```{r}
+T_fgsea[["CD8 Teff"]]
+```
+#### T cell Hallmarks
+
+
+```{r}
+Hallmark_vector <- names(fgsea_sets_Hallmark)
+celltype_vector <- as.character(unique(T_cell_markers$cluster))
+table_res_T <- data.frame(pathway = Hallmark_vector)
+for (i in celltype_vector){
+  table_tmp <- T_fgsea_hallmark[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Hallmark_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_T <- full_join(table_res_T,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_T[is.na(table_res_T)] = 0
+table_res_T <- table_res_T[apply(table_res_T[,2:7],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_T,file = "fgsea_T_cell_Hallmark_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+
+```{r}
+lymph_pal <- gg_color_hue(11) #total of 11 celltypes; color-coding will be matched by names
+names(lymph_pal) <- unique(unname(lymphoid$annotation))[order(unique(unname(lymphoid$annotation)))]
+# match the order in seurat dimplot to make color-coding consistent
+col_gsea = list(
+  Cell_type = lymph_pal
+)
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_T)[2:7],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_T[,2:7])
+rownames(gsea_mat) <- table_res_T$pathway
+Heatmap(gsea_mat,name = "Hallmark GSEA",top_annotation = ha,cluster_rows = F,cluster_columns = F,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+
+```
+
+#### T cell KEGG
+
+```{r}
+KEGG_vector <- names(fgsea_sets_KEGG)
+celltype_vector <- as.character(unique(T_cell_markers$cluster))
+table_res_T <- data.frame(pathway = KEGG_vector)
+for (i in celltype_vector){
+  table_tmp <- T_fgsea_KEGG[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% KEGG_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_T <- full_join(table_res_T,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_T[is.na(table_res_T)] = 0
+table_res_T <- table_res_T[apply(table_res_T[,2:7],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_T,file = "fgsea_T_cell_KEGG_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+
+```{r}
+lymph_pal <- gg_color_hue(11) #total of 11 celltypes; color-coding will be matched by names
+names(lymph_pal) <- unique(unname(lymphoid$annotation))[order(unique(unname(lymphoid$annotation)))]
+# match the order in seurat dimplot to make color-coding consistent
+col_gsea = list(
+  Cell_type = lymph_pal
+)
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_T)[2:7],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_T[,2:7])
+rownames(gsea_mat) <- table_res_T$pathway
+Heatmap(gsea_mat,name = "Hallmark GSEA",top_annotation = ha,cluster_rows = F,cluster_columns = F,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+
+```
+
+#### T Imm gene sets
+
+```{r}
+Imm_vector <- names(fgsea_sets_Imm)
+celltype_vector <- as.character(unique(T_cell_markers$cluster))
+table_res_T <- data.frame(pathway = Imm_vector)
+for (i in celltype_vector){
+  table_tmp <- T_fgsea_Imm[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Imm_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_T <- full_join(table_res_T,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_T[is.na(table_res_T)] = 0
+table_res_T <- table_res_T[apply(table_res_T[,2:7],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_T,file = "fgsea_T_cell_Imm_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+
+```{r}
+lymph_pal <- gg_color_hue(11) #total of 11 celltypes; color-coding will be matched by names
+names(lymph_pal) <- unique(unname(lymphoid$annotation))[order(unique(unname(lymphoid$annotation)))]
+# match the order in seurat dimplot to make color-coding consistent
+col_gsea = list(
+  Cell_type = lymph_pal
+)
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_T)[2:7],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_T[,2:7])
+rownames(gsea_mat) <- table_res_T$pathway
+Heatmap(gsea_mat,name = "Imm GSEA",top_annotation = ha,cluster_rows = F,cluster_columns = F,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+
+```
+
+#### reactome
+
+```{r}
+REACT_vector <- names(fgsea_sets_REACT)
+celltype_vector <- as.character(unique(T_cell_markers$cluster))
+table_res_T <- data.frame(pathway = REACT_vector)
+for (i in celltype_vector){
+  table_tmp <- T_fgsea_react[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% REACT_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_T <- full_join(table_res_T,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_T[is.na(table_res_T)] = 0
+table_res_T <- table_res_T[apply(table_res_T[,2:7],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_T,file = "fgsea_T_cell_reactome_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+
+```{r}
+lymph_pal <- gg_color_hue(11) #total of 11 celltypes; color-coding will be matched by names
+names(lymph_pal) <- unique(unname(lymphoid$annotation))[order(unique(unname(lymphoid$annotation)))]
+# match the order in seurat dimplot to make color-coding consistent
+col_gsea = list(
+  Cell_type = lymph_pal
+)
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_T)[2:7],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_T[,2:7])
+rownames(gsea_mat) <- table_res_T$pathway
+Heatmap(gsea_mat,name = "Hallmark GSEA",top_annotation = ha,cluster_rows = F,cluster_columns = F,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+
+```
+
+
+#### T cell types
+
+```{r}
+CT_vector <- names(fgsea_sets_Celltype)
+celltype_vector <- as.character(unique(T_cell_markers$cluster))
+table_res_T <- data.frame(pathway = CT_vector)
+for (i in celltype_vector){
+  table_tmp <- T_fgsea_CT[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% CT_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_T <- full_join(table_res_T,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_T[is.na(table_res_T)] = 0
+table_res_T <- table_res_T[apply(table_res_T[,2:7],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_T,file = "fgsea_T_cell_celltype_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+
+```{r}
+lymph_pal <- gg_color_hue(11) #total of 11 celltypes; color-coding will be matched by names
+names(lymph_pal) <- unique(unname(lymphoid$annotation))[order(unique(unname(lymphoid$annotation)))]
+# match the order in seurat dimplot to make color-coding consistent
+col_gsea = list(
+  Cell_type = lymph_pal
+)
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_T)[2:7],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_T[,2:7])
+rownames(gsea_mat) <- table_res_T$pathway
+Heatmap(gsea_mat,name = "Celltype GSEA",top_annotation = ha,cluster_rows = F,cluster_columns = F,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+
+```
+
+#### NK hallmarks
+
+
+```{r}
+Hallmark_vector <- names(fgsea_sets_Hallmark)
+celltype_vector <- as.character(unique(NK_markers$cluster))
+table_res_NK <- data.frame(pathway = Hallmark_vector)
+for (i in celltype_vector){
+  table_tmp <- NK_fgsea_hallmark[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Hallmark_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_NK <- full_join(table_res_NK,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_NK[is.na(table_res_NK)] = 0
+table_res_NK <- table_res_NK[apply(table_res_NK[,2:6],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_NK,file = "fgsea_NK_Hallmark_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+```{r}
+table_res_NK[is.na(table_res_NK)] = 0
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_NK)[2:6],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_NK[,2:6])
+rownames(gsea_mat) <- table_res_NK$pathway
+Heatmap(gsea_mat,name = "NK GSEA",top_annotation = ha,cluster_rows = F,cluster_columns = T,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+```
+```{r}
+pdf(paste0(outdir,"GSEA_HALLMARK_NK_heatmap.pdf"))
+Heatmap(gsea_mat,name = "NK GSEA",top_annotation = ha,cluster_rows = F,cluster_columns = T,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+dev.off()
+```
+
+
+
+#### NK KEGG
+
+```{r}
+KEGG_vector <- names(fgsea_sets_KEGG)
+celltype_vector <- as.character(unique(NK_markers$cluster))
+table_res_NK <- data.frame(pathway = KEGG_vector)
+for (i in celltype_vector){
+  table_tmp <- NK_fgsea_KEGG[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% KEGG_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_NK <- full_join(table_res_NK,table_celltype,by = "pathway")
+}
+```
+
+
+```{r}
+table_res_NK[is.na(table_res_NK)] = 0
+table_res_NK <- table_res_NK[apply(table_res_NK[,2:6],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_NK,file = "fgsea_NK_KEGG_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+
+```{r}
+table_res_NK[is.na(table_res_NK)] = 0
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_NK)[2:6],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_NK[,2:6])
+rownames(gsea_mat) <- table_res_NK$pathway
+Heatmap(gsea_mat,name = "GSEA KEGG",top_annotation = ha,cluster_rows = F,cluster_columns = F,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+```
+
+```{r}
+pdf(paste0(outdir,"GSEA_KEGG_NK_heatmap.pdf"))
+Heatmap(gsea_mat,name = "GSEA KEGG",top_annotation = ha,cluster_rows = F,cluster_columns = F,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+dev.off()
+```
+
+#### NK reactome
+
+```{r}
+REACT_vector <- names(fgsea_sets_REACT)
+celltype_vector <- as.character(unique(NK_markers$cluster))
+table_res_NK <- data.frame(pathway = REACT_vector)
+for (i in celltype_vector){
+  table_tmp <- NK_fgsea_react[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% REACT_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_NK <- full_join(table_res_NK,table_celltype,by = "pathway")
+}
+```
+
+
+```{r}
+table_res_NK[is.na(table_res_NK)] = 0
+table_res_NK <- table_res_NK[apply(table_res_NK[,2:6],1,var) != 0,]
+```
+
+
+```{r}
+write.table(table_res_NK,file = "fgsea_NK_reactome_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+
+#### NK Imm
+
+```{r}
+Imm_vector <- names(fgsea_sets_Imm)
+celltype_vector <- as.character(unique(NK_markers$cluster))
+table_res_NK <- data.frame(pathway = Imm_vector)
+for (i in celltype_vector){
+  table_tmp <- NK_fgsea_Imm[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Imm_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_NK <- full_join(table_res_NK,table_celltype,by = "pathway")
+}
+```
+
+
+```{r}
+table_res_NK[is.na(table_res_NK)] = 0
+table_res_NK <- table_res_NK[apply(table_res_NK[,2:6],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_NK,file = "fgsea_NK_Imm_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+
+```{r}
+table_res_NK[is.na(table_res_NK)] = 0
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_NK)[2:6],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_NK[,2:6])
+rownames(gsea_mat) <- table_res_NK$pathway
+Heatmap(gsea_mat,name = "GSEA Imm",top_annotation = ha,cluster_rows = F,cluster_columns = F,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+```
+
+#### NK  cell type
+
+```{r}
+CT_vector <- names(fgsea_sets_Celltype)
+celltype_vector <- as.character(unique(NK_markers$cluster))
+table_res_NK <- data.frame(pathway = CT_vector)
+for (i in celltype_vector){
+  table_tmp <- NK_fgsea_CT[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% CT_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_NK <- full_join(table_res_NK,table_celltype,by = "pathway")
+}
+```
+
+
+```{r}
+table_res_NK[is.na(table_res_NK)] = 0
+table_res_NK <- table_res_NK[apply(table_res_NK[,2:6],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_NK,file = "fgsea_NK_celltype_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+
+```{r}
+table_res_NK[is.na(table_res_NK)] = 0
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_NK)[2:6],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_NK[,2:6])
+rownames(gsea_mat) <- table_res_NK$pathway
+Heatmap(gsea_mat,name = "GSEA Imm",top_annotation = ha,cluster_rows = F,cluster_columns = F,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+```
+
+
+### GO analysis
+
+```{r}
+GO_out <- groupGO(gene  = ID$ENTREZID,
+               OrgDb    = org.Mm.eg.db,
+               ont      = "BP",
+               level    = 3,
+               readable = TRUE)
+```
+
+```{r}
+head(GO_out)
+```
+
+```{r}
+ego <- enrichGO(gene          = T_cell_markers$gene,
+                OrgDb         = org.Mm.eg.db,
+                keyType = "SYMBOL",
+                ont           = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.01,
+                qvalueCutoff  = 0.05,
+        readable      = TRUE)
+head(ego)
+```
+```{r}
+ego_table <- ego@result %>% arrange(Count)
+```
+
+```{r}
+write.table(ego_table,file = "NK_1_GOenrich.tsv",sep = "\t",row.names = F,col.names = T)
+```
+
+
+
+```{r}
+goplot(ego)
+```
+
+
+
+
+
+
+
+
+# Fig 3 E Mono_Mac
+
+```{r}
+mono_mac_markers <- read.table("within_cell_type_DE/mono_mac_annotation_markers_V2.tsv",sep = "\t",header = T)
+```
+
+```{r}
+table(mono_mac_markers$cluster)
+```
+```{r}
+mm_clusters <- mono_mac_markers$cluster
+mm_clusters <- gsub("/","-",mm_clusters)
+mono_mac_markers$cluster <- mm_clusters
+```
+
+## Mono-mac GSEA
+
+```{r}
+mono_mac_hallmarks <- fgsea_res(as.character(unique(mono_mac_markers$cluster)),mono_mac_markers,mode = "simple")
+```
+
+
+```{r}
+mono_mac_react <- fgsea_res(as.character(unique(mono_mac_markers$cluster)),mono_mac_markers,gene_set = fgsea_sets_REACT,mode = "simple")
+```
+
+```{r}
+mono_mac_KEGG <- fgsea_res(as.character(unique(mono_mac_markers$cluster)),mono_mac_markers,gene_set = fgsea_sets_KEGG,mode = "simple")
+```
+
+
+```{r}
+mono_mac_CT <- fgsea_res(as.character(unique(mono_mac_markers$cluster)),mono_mac_markers,gene_set = fgsea_sets_Celltype,mode = "simple")
+```
+
+
+
+
+
+## create colors and tables for heatmap
+
+### Hallmark
+
+```{r}
+Hallmark_vector <- names(fgsea_sets_Hallmark)
+celltype_vector <- as.character(unique(mono_mac_markers$cluster))
+table_res_mono <- data.frame(pathway = Hallmark_vector)
+for (i in celltype_vector){
+  table_tmp <- mono_mac_hallmarks[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Hallmark_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_mono <- full_join(table_res_mono,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_mono[is.na(table_res_mono)] = 0
+table_res_mono <- table_res_mono[apply(table_res_mono[,2:7],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_mono,file = "fgsea_mono-mac_Hallmark_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+```{r}
+names(celltype_pal_mono) <- unique(unname(mono_mac_markers$cluster))[order(unique(unname(mono_mac_markers$cluster)))]
+col_gsea = list(
+  Cell_type = celltype_pal_mono
+)
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_mono)[2:7],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_mono[,2:7])
+rownames(gsea_mat) <- table_res_mono$pathway
+gsea_mat <- gsea_mat[,order(colnames(gsea_mat))]
+Heatmap(gsea_mat,name = "Mono/Mac Hallmark GSEA",top_annotation = ha,cluster_rows = F,cluster_columns = T,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+```
+```{r}
+pdf(paste0(outdir,"GSEA_HALLMARK_mono-mac_heatmap.pdf"))
+Heatmap(gsea_mat,name = "Mono/Mac Hallmark GSEA",top_annotation = ha,cluster_rows = F,cluster_columns = F,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+dev.off()
+```
+
+### KEGG
+
+```{r}
+KEGG_vector <- names(fgsea_sets_KEGG)
+celltype_vector <- as.character(unique(mono_mac_markers$cluster))
+table_res_mono <- data.frame(pathway = KEGG_vector)
+for (i in celltype_vector){
+  table_tmp <- mono_mac_KEGG[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% KEGG_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_mono <- full_join(table_res_mono,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_mono[is.na(table_res_mono)] = 0
+table_res_mono <- table_res_mono[apply(table_res_mono[,2:7],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_mono,file = "fgsea_mono-mac_KEGG_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+```{r}
+names(celltype_pal_mono) <- unique(unname(mono_mac_markers$cluster))[order(unique(unname(mono_mac_markers$cluster)))]
+col_gsea = list(
+  Cell_type = celltype_pal_mono
+)
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_mono)[2:7],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_mono[,2:7])
+rownames(gsea_mat) <- table_res_mono$pathway
+Heatmap(gsea_mat,name = "Mono/Mac KEGG GSEA",top_annotation = ha,cluster_rows = F,cluster_columns = F,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5), show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+```
+```{r}
+pdf(paste0(outdir,"GSEA_KEGG_mono-mac_heatmap.pdf"))
+Heatmap(gsea_mat,name = "Mono/Mac KEGG GSEA",top_annotation = ha,cluster_rows = F,cluster_columns = F,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+dev.off()
+```
+
+
+### Reactome
+
+```{r}
+REACT_vector <- names(fgsea_sets_REACT)
+celltype_vector <- as.character(unique(mono_mac_markers$cluster))
+table_res_mono <- data.frame(pathway = REACT_vector)
+for (i in celltype_vector){
+  table_tmp <- mono_mac_react[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% REACT_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_mono <- full_join(table_res_mono,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_mono[is.na(table_res_mono)] = 0
+table_res_mono <- table_res_mono[apply(table_res_mono[,2:7],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_mono,file = "fgsea_mono-mac_Reactome_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+```{r}
+names(celltype_pal_mono) <- unique(unname(mono_mac_markers$cluster))[order(unique(unname(mono_mac_markers$cluster)))]
+col_gsea = list(
+  Cell_type = celltype_pal_mono
+)
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_mono)[2:7],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_mono[,2:7])
+rownames(gsea_mat) <- table_res_mono$pathway
+Heatmap(gsea_mat,name = "Mono/Mac KEGG GSEA",top_annotation = ha,cluster_rows = F,cluster_columns = F,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5), show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+```
+
+### cell type
+
+### Reactome
+
+```{r}
+CT_vector <- names(fgsea_sets_Celltype)
+celltype_vector <- as.character(unique(mono_mac_markers$cluster))
+table_res_mono <- data.frame(pathway = CT_vector)
+for (i in celltype_vector){
+  table_tmp <- mono_mac_CT[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% CT_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_mono <- full_join(table_res_mono,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_mono[is.na(table_res_mono)] = 0
+table_res_mono <- table_res_mono[apply(table_res_mono[,2:7],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_mono,file = "fgsea_mono-mac_celltype_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+```{r}
+names(celltype_pal_mono) <- unique(unname(mono_mac_markers$cluster))[order(unique(unname(mono_mac_markers$cluster)))]
+col_gsea = list(
+  Cell_type = celltype_pal_mono
+)
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_mono)[2:7],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_mono[,2:7])
+rownames(gsea_mat) <- table_res_mono$pathway
+Heatmap(gsea_mat,name = "Mono/Mac KEGG GSEA",top_annotation = ha,cluster_rows = F,cluster_columns = F,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5), show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+```
+
+# Fig 4D neutrophils
+
+```{r}
+neutrophil_markers <- read.table("within_cell_type_DE/Neutrophil_annotation_markers.tsv",sep = "\t",header = T)
+```
+
+## fgsea
+
+```{r}
+neutrophil_hallmarks <- fgsea_res(as.character(unique(neutrophil_markers$cluster)),neutrophil_markers,mode = "simple")
+```
+
+```{r}
+neutrophil_reactome <- fgsea_res(as.character(unique(neutrophil_markers$cluster)),neutrophil_markers,gene_set = fgsea_sets_REACT,mode = "simple")
+```
+
+
+```{r}
+neutrophil_KEGG <- fgsea_res(as.character(unique(neutrophil_markers$cluster)),neutrophil_markers,gene_set = fgsea_sets_KEGG,mode = "simple")
+```
+
+```{r}
+neutrophil_CT <- fgsea_res(as.character(unique(neutrophil_markers$cluster)),neutrophil_markers,gene_set = fgsea_sets_Celltype,mode = "simple")
+```
+
+
+
+## create tables and heatmap
+
+### hallmark
+
+```{r}
+Hallmark_vector <- names(fgsea_sets_Hallmark)
+celltype_vector <- as.character(unique(neutrophil_markers$cluster))
+table_res_neu <- data.frame(pathway = Hallmark_vector)
+for (i in celltype_vector){
+  table_tmp <- neutrophil_hallmarks[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Hallmark_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_neu <- full_join(table_res_neu,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_neu[is.na(table_res_neu)] = 0
+table_res_neu <- table_res_neu[apply(table_res_neu[,2:4],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_neu,file = "fgsea_neutrophil_Hallmark_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+```{r}
+names(neu_pal) <- unique(unname(neutrophil_markers$cluster))[order(unique(unname(neutrophil_markers$cluster)))]
+col_gsea = list(
+  Cell_type = neu_pal
+)
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_neu)[2:4],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_neu[,2:4])
+rownames(gsea_mat) <- table_res_neu$pathway
+gsea_mat <- gsea_mat[,order(colnames(gsea_mat))]
+Heatmap(gsea_mat,name = "Hallmark Pathway",top_annotation = ha,cluster_rows = F,cluster_columns = T,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+```
+```{r}
+pdf(paste0(outdir,"GSEA_HALLMARK_neutrophil_heatmap.pdf"))
+Heatmap(gsea_mat,name = "Hallmark Pathway",top_annotation = ha,cluster_rows = F,cluster_columns = T,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+dev.off()
+```
+
+
+### KEGG
+
+```{r}
+KEGG_vector <- names(fgsea_sets_KEGG)
+celltype_vector <- as.character(unique(neutrophil_markers$cluster))
+table_res_neu <- data.frame(pathway = KEGG_vector)
+for (i in celltype_vector){
+  table_tmp <- neutrophil_KEGG[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% KEGG_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_neu <- full_join(table_res_neu,table_celltype,by = "pathway")
+}
+```
+
+
+```{r}
+table_res_neu[is.na(table_res_neu)] = 0
+table_res_neu <- table_res_neu[apply(table_res_neu[,2:4],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_neu,file = "fgsea_neutrophil_KEGG_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+```{r}
+names(neu_pal) <- unique(unname(neutrophil_markers$cluster))[order(unique(unname(neutrophil_markers$cluster)))]
+col_gsea = list(
+  Cell_type = neu_pal
+)
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_neu)[2:4],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_neu[,2:4])
+rownames(gsea_mat) <- table_res_neu$pathway
+gsea_mat <- gsea_mat[,order(colnames(gsea_mat))]
+Heatmap(gsea_mat,name = "Hallmark Pathway",top_annotation = ha,cluster_rows = F,cluster_columns = T,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+```
+```{r}
+pdf(paste0(outdir,"GSEA_KEGG_neutrophil_heatmap.pdf"))
+Heatmap(gsea_mat,name = "Hallmark Pathway",top_annotation = ha,cluster_rows = F,cluster_columns = T,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+dev.off()
+```
+
+
+### reactome
+
+```{r}
+REACT_vector <- names(fgsea_sets_REACT)
+celltype_vector <- as.character(unique(neutrophil_markers$cluster))
+table_res_neu <- data.frame(pathway = REACT_vector)
+for (i in celltype_vector){
+  table_tmp <- neutrophil_reactome[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% REACT_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_neu <- full_join(table_res_neu,table_celltype,by = "pathway")
+}
+```
+
+
+```{r}
+table_res_neu[is.na(table_res_neu)] = 0
+table_res_neu <- table_res_neu[apply(table_res_neu[,2:4],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_neu,file = "fgsea_neutrophil_reactome_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+```{r}
+names(neu_pal) <- unique(unname(neutrophil_markers$cluster))[order(unique(unname(neutrophil_markers$cluster)))]
+col_gsea = list(
+  Cell_type = neu_pal
+)
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_neu)[2:4],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_neu[,2:4])
+rownames(gsea_mat) <- table_res_neu$pathway
+gsea_mat <- gsea_mat[,order(colnames(gsea_mat))]
+Heatmap(gsea_mat,name = "Hallmark Pathway",top_annotation = ha,cluster_rows = F,cluster_columns = T,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+```
+
+
+### celltype
+
+
+```{r}
+CT_vector <- names(fgsea_sets_Celltype)
+celltype_vector <- as.character(unique(neutrophil_markers$cluster))
+table_res_neu <- data.frame(pathway = CT_vector)
+for (i in celltype_vector){
+  table_tmp <- neutrophil_CT[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% CT_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_neu <- full_join(table_res_neu,table_celltype,by = "pathway")
+}
+```
+
+
+```{r}
+table_res_neu[is.na(table_res_neu)] = 0
+table_res_neu <- table_res_neu[apply(table_res_neu[,2:4],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_neu,file = "fgsea_neutrophil_celltype_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+
+
+
+
+## Supp cond DE
+
+```{r}
+neutrophil_cond_DE <- read.table(paste0(outdir,paste0('ZBTB46_vs_Control_', "Neutrophil", '.tsv')),sep = "\t",header = T) %>% filter(p_val_adj < 0.05)
+```
+
+## Hallmark
+
+
+```{r}
+neutrophil_hallmarks <- fgsea_res(as.character(unique(neutrophil_cond_DE$cluster)),neutrophil_cond_DE,mode = "simple")
+```
+
+```{r}
+neutrophil_cond_KEGG <- fgsea_res(as.character(unique(neutrophil_cond_DE$cluster)),neutrophil_cond_DE,mode = "simple",gene_set = fgsea_sets_KEGG)
+```
+```{r}
+neutrophil_cond_reactome <- fgsea_res(as.character(unique(neutrophil_cond_DE$cluster)),neutrophil_cond_DE,mode = "simple",gene_set = fgsea_sets_REACT)
+```
+
+
+# Fig 5D DC GSEA
+
+```{r}
+DC_markers <- read.table("within_cell_type_DE/DC_annotation_markers.tsv",sep = "\t",header = T)
+```
+
+```{r}
+DC_gene_selected <- DC_markers %>% group_by(cluster) %>% filter(p_val_adj < 0.05 & abs(avg_log2FC) > 1 & pct.1 > 0.5 ) %>% arrange(-abs(avg_log2FC)) %>% filter(!(grepl("^Gm",gene) & cluster == "")) %>% slice_max(order_by = abs(avg_log2FC),n=10)
+```
+
+```{r}
+DC_hallmarks <- fgsea_res(as.character(unique(DC_markers$cluster)),DC_markers,mode = "simple")
+```
+```{r}
+DC_reactome <- fgsea_res(as.character(unique(DC_markers$cluster)),DC_markers,gene_set = fgsea_sets_REACT,mode = "simple")
+```
+
+
+```{r}
+DC_KEGG <- fgsea_res(as.character(unique(DC_markers$cluster)),DC_markers,gene_set = fgsea_sets_KEGG,mode = "simple")
+```
+
+### cell type
+
+```{r}
+DC_CT <- fgsea_res(as.character(unique(DC_markers$cluster)),DC_markers,gene_set = fgsea_sets_Celltype,mode = "simple")
+```
+
+### DC immunologic
+
+```{r}
+DC_Imm <- fgsea_res(as.character(unique(DC_markers$cluster)),DC_markers,gene_set = fgsea_sets_Imm,mode = "simple")
+```
+
+
+## DC heatmap
+
+### Hallmark
+
+```{r}
+Hallmark_vector <- names(fgsea_sets_Hallmark)
+celltype_vector <- as.character(unique(DC_markers$cluster))
+table_res_DC <- data.frame(pathway = Hallmark_vector)
+for (i in celltype_vector){
+  table_tmp <- DC_hallmarks[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Hallmark_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_DC <- full_join(table_res_DC,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_DC[is.na(table_res_DC)] = 0
+table_res_DC <- table_res_DC[apply(table_res_DC[,2:5],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_DC,file = "fgsea_DC_Hallmark_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+```{r}
+DC_pal <- gg_color_hue(4)
+names(DC_pal) <- unique(unname(DC_markers$cluster))[order(unique(unname(DC_markers$cluster)))]
+col_gsea = list(
+  Cell_type = DC_pal
+)
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_DC)[2:5],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_DC[,2:5])
+rownames(gsea_mat) <- table_res_DC$pathway
+gsea_mat <- gsea_mat[,order(colnames(gsea_mat))]
+Heatmap(gsea_mat,name = "Hallmark Pathway",top_annotation = ha,cluster_rows = F,cluster_columns = T,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+```
+
+### celltype
+
+```{r}
+CT_vector <- names(fgsea_sets_Celltype)
+celltype_vector <- as.character(unique(DC_markers$cluster))
+table_res_DC <- data.frame(pathway = CT_vector)
+for (i in celltype_vector){
+  table_tmp <- DC_CT[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% CT_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_DC <- full_join(table_res_DC,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_DC[is.na(table_res_DC)] = 0
+table_res_DC <- table_res_DC[apply(table_res_DC[,2:5],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_DC,file = "fgsea_DC_celltype_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+
+### reactome
+
+```{r}
+REACT_vector <- names(fgsea_sets_REACT)
+celltype_vector <- as.character(unique(DC_markers$cluster))
+table_res_DC <- data.frame(pathway = REACT_vector)
+for (i in celltype_vector){
+  table_tmp <- DC_reactome[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% REACT_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_DC <- full_join(table_res_DC,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_DC[is.na(table_res_DC)] = 0
+table_res_DC <- table_res_DC[apply(table_res_DC[,2:5],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_DC,file = "fgsea_DC_reactome_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+
+### KEGG
+
+```{r}
+KEGG_vector <- names(fgsea_sets_KEGG)
+celltype_vector <- as.character(unique(DC_markers$cluster))
+table_res_DC <- data.frame(pathway = KEGG_vector)
+for (i in celltype_vector){
+  table_tmp <- DC_KEGG[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% KEGG_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_DC <- full_join(table_res_DC,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_DC[is.na(table_res_DC)] = 0
+table_res_DC <- table_res_DC[apply(table_res_DC[,2:5],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_DC,file = "fgsea_DC_KEGG_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+### Immunologic
+
+```{r}
+Imm_vector <- names(fgsea_sets_Imm)
+celltype_vector <- as.character(unique(DC_markers$cluster))
+table_res_DC <- data.frame(pathway = Imm_vector)
+for (i in celltype_vector){
+  table_tmp <- DC_Imm[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Imm_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_DC <- full_join(table_res_DC,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_DC[is.na(table_res_DC)] = 0
+table_res_DC <- table_res_DC[apply(table_res_DC[,2:5],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_DC,file = "fgsea_DC_Imm_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+## Supp: DE across condition for mast cells
+
+```{r}
+mast_cond_DE <- read.table(paste0(outdir,paste0('ZBTB46_vs_Control_', "Mast_cells", '.tsv')),sep = "\t",header = T) %>% filter(p_val_adj < 0.05)
+```
+### Hallmark
+
+```{r}
+Mast_hallmark <- fgsea_res(as.character(unique(mast_cond_DE$cluster)),mast_cond_DE,mode = "simple")
+```
+
+
+
+
+### reactome
+
+```{r}
+Mast_REACT <- fgsea_res(as.character(unique(mast_cond_DE$cluster)),mast_cond_DE,gene_set = fgsea_sets_REACT,mode = "simple")
+```
+
+```{r}
+Mast_KEGG <- fgsea_res(as.character(unique(mast_cond_DE$cluster)),mast_cond_DE,gene_set = fgsea_sets_KEGG,mode = "simple")
+```
+
+
+
+# Fig 6 D CAF GSEA 
+
+
+```{r}
+CAF_markers <- read.table("within_cell_type_DE/CAF_annotation_markers_V2.tsv",sep = "\t",header = T)
+```
+
+
+```{r}
+CAF_hallmarks <- fgsea_res(as.character(unique(CAF_markers$cluster)),CAF_markers,mode = "simple")
+```
+
+
+```{r}
+CAF_reactome <- fgsea_res(as.character(unique(CAF_markers$cluster)),CAF_markers,gene_set = fgsea_sets_REACT,mode = "simple")
+```
+
+```{r}
+CAF_KEGG <- fgsea_res(as.character(unique(CAF_markers$cluster)),CAF_markers,gene_set = fgsea_sets_KEGG,mode = "simple")
+```
+
+```{r}
+CAF_CT <- fgsea_res(as.character(unique(CAF_markers$cluster)),CAF_markers,gene_set = fgsea_sets_Celltype,mode = "simple")
+```
+
+
+
+## GSEA plots
+
+
+### Hallmark
+
+
+```{r}
+Hallmark_vector <- names(fgsea_sets_Hallmark)
+celltype_vector <- as.character(unique(CAF_markers$cluster))
+table_res_CAF <- data.frame(pathway = Hallmark_vector)
+for (i in celltype_vector){
+  table_tmp <- CAF_hallmarks[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Hallmark_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_CAF <- full_join(table_res_CAF,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_CAF[is.na(table_res_CAF)] = 0
+table_res_CAF <- table_res_CAF[apply(table_res_CAF[,2:6],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_CAF,file = "fgsea_CAF_Hallmark_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+```{r}
+names(CAF_pal) <- unique(unname(CAF_markers$cluster))[order(unique(unname(CAF_markers$cluster)))]
+col_gsea = list(
+  Cell_type = CAF_pal
+)
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_CAF)[2:6],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_CAF[,2:6])
+rownames(gsea_mat) <- table_res_CAF$pathway
+gsea_mat <- gsea_mat[,order(colnames(gsea_mat))]
+Heatmap(gsea_mat,name = "Hallmark Pathway",top_annotation = ha,cluster_rows = F,cluster_columns = T,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+```
+
+
+### KEGG
+
+
+```{r}
+KEGG_vector <- names(fgsea_sets_KEGG)
+celltype_vector <- as.character(unique(CAF_markers$cluster))
+table_res_CAF <- data.frame(pathway = KEGG_vector)
+for (i in celltype_vector){
+  table_tmp <- CAF_KEGG[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% KEGG_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_CAF <- full_join(table_res_CAF,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_CAF[is.na(table_res_CAF)] = 0
+table_res_CAF <- table_res_CAF[apply(table_res_CAF[,2:6],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_CAF,file = "fgsea_CAF_KEGG_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+```{r}
+names(CAF_pal) <- unique(unname(CAF_markers$cluster))[order(unique(unname(CAF_markers$cluster)))]
+col_gsea = list(
+  Cell_type = CAF_pal
+)
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_CAF)[2:6],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_CAF[,2:6])
+rownames(gsea_mat) <- table_res_CAF$pathway
+Heatmap(gsea_mat,name = "Hallmark Pathway",top_annotation = ha,cluster_rows = F,cluster_columns = T,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+```
+
+
+### reactome
+
+```{r}
+REACT_vector <- names(fgsea_sets_REACT)
+celltype_vector <- as.character(unique(CAF_markers$cluster))
+table_res_CAF <- data.frame(pathway = REACT_vector)
+for (i in celltype_vector){
+  table_tmp <- CAF_reactome[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% REACT_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_CAF <- full_join(table_res_CAF,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_CAF[is.na(table_res_CAF)] = 0
+table_res_CAF <- table_res_CAF[apply(table_res_CAF[,2:6],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_CAF,file = "fgsea_CAF_reactome_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+```{r}
+names(CAF_pal) <- unique(unname(CAF_markers$cluster))[order(unique(unname(CAF_markers$cluster)))]
+col_gsea = list(
+  Cell_type = CAF_pal
+)
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res_CAF)[2:6],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res_CAF[,2:6])
+rownames(gsea_mat) <- table_res_CAF$pathway
+Heatmap(gsea_mat,name = "reactome Pathway",top_annotation = ha,cluster_rows = F,cluster_columns = T,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+```
+
+
+### celltype
+
+```{r}
+CT_vector <- names(fgsea_sets_Celltype)
+celltype_vector <- as.character(unique(CAF_markers$cluster))
+table_res_CAF <- data.frame(pathway = CT_vector)
+for (i in celltype_vector){
+  table_tmp <- CAF_CT[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% CT_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_CAF <- full_join(table_res_CAF,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_CAF[is.na(table_res_CAF)] = 0
+table_res_CAF <- table_res_CAF[apply(table_res_CAF[,2:6],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_CAF,file = "fgsea_CAF_celltype_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+
+
+# Fig 6E stromal: EC trt v.s. ctrl
+
+```{r}
+EC_cond_DE <- read.table("ZBTB46_vs_Control_stromal_2.tsv",sep = "\t",header = T) %>% filter(p_val_adj < 0.05)
+```
+
+
+
+
+```{r}
+EC_hallmark <- fgsea_res(as.character(unique(EC_cond_DE$cluster)),EC_cond_DE,mode = "simple")
+```
+
+```{r}
+EC_REACT <- fgsea_res(as.character(unique(EC_cond_DE$cluster)),EC_cond_DE,gene_set = fgsea_sets_REACT,mode = "simple")
+```
+
+

@@ -1,0 +1,162 @@
+---
+title: "GSEA"
+output: html_document
+date: "2024-03-19"
+---
+
+**Note**: the original file is Functional_Analysis_and_Visualization.Rmd, which contains the full codes for completing the analysis for all compartment of interest. This Rmd is for demonstration purpose.The GO analysis section is removed in this version.
+
+Note that I might have taken advantadge of the global environment and used the markers that were generated in another Rmd file that was opened simultanouesly as Functional_Analysis_and_Visualization.Rmd. Thus, the original Rmd may have the loading steps missing.
+
+```{r}
+library(msigdbr) # for retreiving geneset
+library(fgsea)
+library(org.Mm.eg.db) # in case gene name conversion is needed.
+library(Seurat) # you know why
+library(tidyverse) # base package for data organization and plotting
+library(RColorBrewer) # for making palettes
+library(gridExtra) # for arranging multiple plots
+library(data.table) # well...
+```
+
+```{r}
+indir <- "./" # These are not the actual indir and outdir
+outdir <- "./"
+```
+
+# Step 0 prepare helper functions
+
+```{r fgsea_res}
+fgsea_res <- function(cell_type_vector, DE_genes, choose_n = 100, choose_tops = F,gene_set = fgsea_sets_Hallmark,mode = "combined"){
+  fgsea_res <- list()
+  DE_selected <- DE_genes %>% mutate(metric = sign(avg_log2FC)*(-log10(p_val_adj))) %>% filter(!is.infinite(metric))
+  if (mode == "simple"){
+    DE_selected <- DE_genes %>% mutate(metric = avg_log2FC) %>% filter(!is.infinite(metric))
+  }
+  for (i in cell_type_vector) {
+    DE <- DE_selected[DE_selected$cluster == i,] %>% arrange(desc(metric)) %>% select(gene,metric)
+    if (choose_tops){
+      DE_top <- DE %>% group_by(cluster) %>% slice_max(order_by = metric, n = choose_n)
+      DE_tail <- DE %>% group_by(cluster) %>% slice_min(order_by = metric, n = choose_n)
+      DE <- rbind(DE_top,DE_tail)
+    }
+    DE <- DE %>% arrange(desc(metric)) %>% select(gene,metric)
+    rankings <- DE$metric
+    names(rankings) <- DE$gene
+    #print(rankings)
+    plot(rankings)
+    fgseaRes <- fgsea(gene_set, stats = rankings,nPermSimple = 10000)
+    fgseaResTidy <- fgseaRes %>%
+      as_tibble() %>% filter(padj < 0.05 ) %>%
+      arrange(desc(NES))
+  fgsea_res[[i]] <- fgseaResTidy
+  fwrite(fgseaResTidy, file=paste0(i,"_fgsea.tsv"), sep="\t", sep2=c("", " ", ""))
+  }
+   return(fgsea_res)
+}
+```
+
+```{r helper function for generate palette that matches seurat color coding}
+gg_color_hue <- function(n) {
+  hues = seq(15, 375, length = n + 1)
+  hcl(h = hues, l = 65, c = 100)[1:n]
+}
+```
+
+
+# Step 1 prepare gene sets
+
+You can also load gene sets from Rda, but I loaded those from `msigdbr` package.
+
+
+```{r prepare gene sets}
+H_df<- msigdbr(species = "Mus musculus", category = "H")
+Imm_df <- msigdbr(species = "Mus musculus", category = "C7",subcategory = "IMMUNESIGDB")
+Celltype_df <- msigdbr(species = "Mus musculus", category = "C8")
+C2_KEGG <- msigdbr(species = "Mus musculus", category = "C2",subcategory = "CP:KEGG")
+C2_React <- msigdbr(species = "Mus musculus", category = "C2",subcategory = "CP:REACTOME")
+
+fgsea_sets_Hallmark <- H_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_Imm <- Imm_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_KEGG <- C2_KEGG %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_REACT <- C2_React %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_Celltype <- Celltype_df %>% split(x = .$gene_symbol, f = .$gs_name)
+```
+
+# Step 2 run fgsea analysis over intended
+
+```{r}
+NK_marker <- read.table(file = paste0(indir,"NK_annotation_markers.tsv"), sep = "\t",header = T,row.names = F)
+```
+
+
+```{r}
+NK_fgsea_hallmark <- fgsea_res(as.character(unique(NK_markers$cluster)),NK_markers,mode = "simple")
+
+NK_fgsea_react <- fgsea_res(as.character(unique(NK_markers$cluster)),NK_markers,gene_set = fgsea_sets_REACT,mode = "simple")
+
+NK_fgsea_KEGG <- fgsea_res(as.character(unique(NK_markers$cluster)),NK_markers,gene_set = fgsea_sets_KEGG,mode = "simple")
+
+NK_fgsea_Imm <- fgsea_res(as.character(unique(NK_markers$cluster)),NK_markers,gene_set = fgsea_sets_Imm,mode = "simple")
+
+NK_fgsea_CT <- fgsea_res(as.character(unique(NK_markers$cluster)),NK_markers,gene_set = fgsea_sets_Celltype,mode = "simple")
+```
+
+# Step 3 consolidate GSEA results from all cell types into a table
+
+## NK hallmarks
+
+
+```{r}
+Hallmark_vector <- names(fgsea_sets_Hallmark)
+celltype_vector <- as.character(unique(NK_markers$cluster))
+table_res_NK <- data.frame(pathway = Hallmark_vector)
+for (i in celltype_vector){
+  table_tmp <- NK_fgsea_hallmark[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Hallmark_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_NK <- full_join(table_res_NK,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_NK[is.na(table_res_NK)] = 0
+table_res_NK <- table_res_NK[apply(table_res_NK[,2:6],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_NK,file = paste0(outdir,"fgsea_NK_Hallmark_consolidated_filtered.tsv"),sep = "\t",row.names = F,quote = F)
+```
+
+# Step 4 visualization of fgsea results as a heatmap
+
+```{r}
+table_res <- read.table(file = paste0(outdir,"fgsea_NK_Hallmark_consolidated_filtered.tsv"),sep = "\t",header = T,row.names = F)
+```
+
+```{r}
+n_celltype = (ncol(table_res) - 1)
+ncols = ncol(table_res)
+pal <- gg_color_hue(n_celltype) # 
+names(pal) <- colnames(table_res)[2:ncols]
+# match the order in seurat dimplot to make color-coding consistent
+col_gsea = list(
+  Cell_type = pal
+)
+ha <- HeatmapAnnotation(
+   Cell_type = colnames(table_res)[2:ncols],
+  col = col_gsea
+)
+gsea_mat <- as.matrix(table_res[,2:ncols])
+rownames(gsea_mat) <- table_res$pathway
+Heatmap(gsea_mat,name = "GSEA",top_annotation = ha,cluster_rows = F,cluster_columns = T,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+```
+
+```{r}
+pdf(paste0(outdir,"GSEA_HALLMARK_heatmap.pdf")) # change file name properly
+Heatmap(gsea_mat,name = "GSEA",top_annotation = ha,cluster_rows = F,cluster_columns = T,show_row_names = TRUE,row_names_gp = grid::gpar(fontsize = 5),
+        show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","beige","red")))
+dev.off()
+```
+

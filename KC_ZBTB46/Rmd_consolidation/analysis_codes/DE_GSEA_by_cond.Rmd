@@ -1,0 +1,88 @@
+---
+title: "DE_GSEA_by_conditions"
+output: html_document
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony)
+library(DoubletFinder)
+library(miQC)
+library(SoupX)
+library(data.table)
+library(SeuratWrappers) #For miQC
+library(MAST)
+library(presto)
+library(msigdbr)
+library(fgsea)
+library(ReactomeGSA)
+```
+
+```{r}
+indir <- "R_outs"
+outdir <- "R_outs"
+```
+
+```{r}
+lym.DE.files <- list.files(path = "R_outs",pattern = "ZBTB46_vs_Control_lymphoid")
+mye.DE.files <- list.files(path = "R_outs",pattern = "ZBTB46_vs_Control_myeloid")
+str.DE.files <- list.files(path = "R_outs",pattern = "ZBTB46_vs_Control_stromal")
+```
+
+```{r}
+test <- read.table(paste0(indir,"/",lym.DE.files[2]),sep = "\t" )#note genes are rownames
+```
+
+```{r}
+i = 1
+clust_name <- gsub(".tsv","",gsub("ZBTB46_vs_Control_lymphoid","",lym.DE.files[i*2]))
+```
+
+
+```{r}
+calculate_n_DE <- function(file_list,celltype){
+  n_clust <- (length(file_list))/2
+  # ideally we want to do apply, but I'm dumb, so I'll do it in a less elegant way
+  cluster <- character(n_clust)
+  total <- integer(n_clust)
+  filtered <- integer(n_clust)
+  for (i in seq(1:n_clust)){
+    clust_name[i] <- gsub("_|.tsv","",gsub(paste0("ZBTB46_vs_Control_",celltype),"",file_list[i*2]))
+    #clust name automatically detected. unfiltered ones are expected to be the even-numbered item of the vector
+    total[i] <- nrow(read.table(paste0(indir,"/",file_list[i*2]),sep = "\t" ))
+    filtered[i] <- nrow(read.table(paste0(indir,"/",file_list[i*2-1]),sep = "\t" ))
+
+    
+  }
+  return(n_DE_DF <- data.frame(cluster = clust_name,n_total = total,n_pass = filtered))
+}
+```
+
+```{r}
+n_DE_lym <- calculate_n_DE(lym.DE.files)
+```
+
+```{r}
+ggplot(n_DE_lym,aes(x=reorder(cluster, as.integer(cluster)),y=n_pass))+
+  geom_bar(stat = "identity", position = 'dodge')+xlab("cluster number")+ylab("number of DE genes with padj < 0.01")+ggtitle("lymphoid at resolution 0.6")
+```
+
+```{r}
+n_DE_mye <- calculate_n_DE(mye.DE.files,"myeloid")
+```
+
+```{r}
+ggplot(n_DE_mye,aes(x=reorder(cluster, as.integer(cluster)),y=n_pass))+
+  geom_bar(stat = "identity", position = 'dodge')+xlab("cluster number")+ylab("number of DE genes with padj < 0.01")+ggtitle("myeloid at resolution 0.6")
+```
+
+```{r}
+n_DE_str <- calculate_n_DE(str.DE.files,"stromal")
+```
+
+```{r}
+ggplot(n_DE_str,aes(x=reorder(cluster, as.integer(cluster)),y=n_pass))+
+  geom_bar(stat = "identity", position = 'dodge')+xlab("cluster number")+ylab("number of DE genes with padj < 0.01")+ggtitle("stromal at resolution 0.2")
+```
+

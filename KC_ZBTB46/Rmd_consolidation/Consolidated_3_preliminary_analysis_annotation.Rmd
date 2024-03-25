@@ -1,0 +1,597 @@
+---
+title: "Preliminary Analysis and Annotation"
+output: html_document
+date: "2024-03-19"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(data.table)
+library(harmony)
+```
+
+**Important Note**: the stromal processing/analysis Rmd is lost. It could be also that the stromal compartment was too small, so no dedicated Rmd was used. Note that the whole dataset is not generated at this stage, because there is an additional step involving table extraction, and the whole V2p4 will be generated in that stage.
+
+# Part 1 annotation of subsets
+
+## 1.1 annotation of lymphoids (originally Lymphoid_analysis.Rmd)
+
+```{r}
+indir = "./R_outs/"
+outdir = "./R_outs/"
+lymphoid_file = "lymphoid_V2.Robj"
+```
+
+```{r}
+load(paste0(outdir,lymphoid_file))
+```
+
+```{r}
+DimPlot(lymphoid,label = T)
+```
+
+```{r}
+T_cells <- subset(lymphoid,idents = c(1,6,12,13))
+NK <- subset(lymphoid,idents = c(10,7,11,2,4,5,0,9,8,3))
+```
+
+### 1.1.1 process and annotate T_cell subset
+
+
+```{r}
+T_cells <- FindVariableFeatures(object = T_cells, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(T_cells) <-  VariableFeatures(T_cells) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(T_cells))]
+VariableFeaturePlot(T_cells)
+T_cells <- ScaleData(object = T_cells, features = VariableFeatures(object = T_cells), vars.to.regress = c("nCount_RNA", "percent.mt"))
+T_cells <- RunPCA(object = T_cells,
+                features =  VariableFeatures(object = T_cells),
+                dims = 1:50)
+gc()
+ElbowPlot(T_cells,ndims = 50)
+T_cells <- RunHarmony(object = T_cells, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+```
+
+```{r}
+T_cells <- RunUMAP(T_cells,dims = 1:20,reduction = "harmony")
+T_cells <- RunTSNE(T_cells,dims = 1:20,reduction = "harmony")
+
+T_cells <- FindNeighbors(T_cells, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  T_cells <- FindClusters(object = T_cells, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+
+```{r}
+DimPlot(T_cells,label = T,group.by = "RNA_snn_res.0.3",reduction = "tsne")
+```
+```{r}
+Idents(T_cells) <- T_cells$RNA_snn_res.0.1
+FeaturePlot(T_cells,features = c("Cd3e"),label = T)
+FeaturePlot(T_cells,features = c("Cd4"),label = T)
+FeaturePlot(T_cells,features = c("Cd8a"),label = T)
+FeaturePlot(T_cells,features = c("Tcf7"),label = T)
+FeaturePlot(T_cells,features = c("Pdcd1"),label = T)
+FeaturePlot(T_cells,features = c("Prf1"),label = T)
+FeaturePlot(T_cells,features = c("Foxp3"),label = T)
+FeaturePlot(T_cells,features = c("Mki67"),label = T)
+```
+
+```{r}
+DotPlot(T_cells,features = c("Cd3e","Cd4","Cd8a","Tcf7","Pdcd1","Prf1","Foxp3","Gzmb","Tigit","Mki67","Isg15","Ifit3","Ifit1"),group.by = "RNA_snn_res.0.3")+RotatedAxis()
+```
+
+```{r}
+T_cells@meta.data <- T_cells@meta.data %>% 
+  mutate(RNA_snn_res.0.3 = as.character(RNA_snn_res.0.3)) %>%
+  mutate(annotation = case_match(
+    RNA_snn_res.0.3,
+    "0" ~ "CD8 Tex",
+    "1" ~ "CD8 Teff",
+    "2" ~ "CD8 Tnaive",
+    "3" ~ "Ifn-responsive T",
+    "4" ~ "Proliferative CD8",
+    "5" ~ "CD4 T"
+  ),
+  celltype = rep("NK",nrow(T_cells@meta.data)))
+```
+
+### 1.1.2 process and annotate NK subset
+
+```{r}
+NK <- FindVariableFeatures(object = NK, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+NK <- ScaleData(object = NK, features = VariableFeatures(object = NK), vars.to.regress = c("nCount_RNA", "percent.mt"))
+NK <- RunPCA(object = NK,
+                features =  VariableFeatures(object = NK),
+                dims = 1:50)
+gc()
+ElbowPlot(NK,ndims = 50)
+NK <- RunHarmony(object = NK, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+```
+
+
+```{r}
+NK <- RunUMAP(NK,dims = 1:20,reduction = "harmony")
+NK <- RunTSNE(NK,dims = 1:20,reduction = "harmony")
+
+NK <- FindNeighbors(NK, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  NK <- FindClusters(object = NK, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+
+```{r}
+DimPlot(NK,label = T,group.by = "RNA_snn_res.0.3",reduction = "tsne")
+```
+
+```{r}
+DimPlot(NK,label = T,group.by =  "RNA_snn_res.0.3")
+```
+
+```{r}
+DotPlot(NK,features = c("Fcgr3","Mki67","Prf1","Tgfbr2","Tgfbr3","Cx3cr1","Il21r","Gzma","Gzmb","Ccl4","Il4ra","Isg15","Ifit1","Klra4","Eomes","Itgam","Cd27"),group.by = "RNA_snn_res.0.3")+RotatedAxis()
+```
+
+```{r}
+NK@meta.data <- NK@meta.data %>% 
+  mutate(RNA_snn_res.0.3 = as.character(RNA_snn_res.0.3)) %>%
+  mutate(annotation = case_match(
+    RNA_snn_res.0.3,
+    "0" ~ "NK_1",
+    "1" ~ "NK_2",
+    "2" ~ "Proliferating NK",
+    "3" ~ "NK_3",
+    "4" ~ "NK_4"
+  ),
+  celltype = rep("NK",nrow(NK@meta.data)))
+```
+
+
+```{r}
+save(T_cells,file = paste0(outdir,"T_cells.Robj"))
+save(NK,file = paste0(outdir,"NK.Robj"))
+```
+
+### 1.1.3 merge-back lymphoid
+
+```{r}
+lymphoid <- merge(T_cells,NK)
+```
+
+```{r}
+lymphoid <- NormalizeData(lymphoid,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+lymphoid <- FindVariableFeatures(object = lymphoid, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+VariableFeatures(lymphoid) <-  VariableFeatures(lymphoid) [!grepl("^Tra|^Trab|^Igh|^Igk|Mamu-a", VariableFeatures(lymphoid))]
+VariableFeaturePlot(lymphoid,selection.method = "mean.var.plot")
+
+lymphoid <- ScaleData(object = lymphoid, features = VariableFeatures(object = lymphoid), vars.to.regress = c("nCount_RNA", "percent.mt"))
+lymphoid <- RunPCA(object = lymphoid,
+                features =  VariableFeatures(object = lymphoid),
+                dims = 1:50)
+gc()
+lymphoid <- RunHarmony(object = lymphoid, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+lymphoid <- RunUMAP(lymphoid,dims = 1:20,reduction = "harmony")
+lymphoid <- RunTSNE(lymphoid,dims = 1:20,reduction = "harmony")
+
+lymphoid <- FindNeighbors(lymphoid, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  lymphoid <- FindClusters(object = lymphoid, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+lymphoid$compartment <- rep("lymphoid",nrow(lymphoid@meta.data))
+```
+
+
+```{r}
+DimPlot(lymphoid,group.by = "annotation",label = T)
+```
+
+
+```{r}
+lymphoid <- JoinLayers(lymphoid)
+save(lymphoid,file=paste0(outdir,"lymphoid_V2p4.Robj"))
+```
+
+## 1.2 annotation of myeloid (originally Myeloid_analysis.Rmd)
+
+```{r}
+indir = "./R_outs/"
+outdir = "./R_outs/"
+myeloid_file = "myeloid_V2.Robj"
+```
+
+```{r}
+load(paste0(outdir,myeloid_file))
+```
+
+```{r}
+DimPlot(myeloid,group.by = "RNA_snn_res.0.7",reduction = "tsne",label = T)
+```
+
+```{r}
+myeloid@meta.data <- myeloid@meta.data %>% 
+  mutate(RNA_snn_res.0.7 = as.character(RNA_snn_res.0.7)) %>%
+  mutate(compartment = rep("myeloid",nrow(myeloid@meta.data)),
+    annotation = case_match(
+    RNA_snn_res.0.7,
+    "0" ~ "Mono/mac_1: M1-like 1",
+    "1" ~ "Mono/mac_2: Mertk- Ccr2+ M1-like",
+    "2" ~ "Mono/mac_3: Mertk+ Ccr2- Arg- M2-like",
+    "3" ~ "Mono/Mac_4: Arg1+ Ifitm1+",
+    "4" ~ "Mono/Mac_5: Mertk+ Ccr2- Arg1+ M2-like",
+    "5" ~ "Mono/Mac_6: Rsad2 high M1-like",
+    "6" ~ "Mono/Mac_7: M1-like 2",
+    "7" ~ "Proliferating Mono/Mac",
+    "8" ~ "Neutrophil_1",
+    "9" ~ "Neutrophil_2",
+    "10" ~ "Neutrophil_3",
+    "11" ~ "cDC2_like",
+    "12" ~ "Mono/Mac_8: Mertk - Ccr2+ Mrc1- Il1r2- M2-like",
+    "13" ~ "Mast cell",
+    "14" ~ "cDC2",
+    "15" ~ "cDC1",
+    "16" ~ "Mono/Mac_9: Mertk+ Ccr2+ M2-like",
+    "17" ~ "pDC"
+  ))
+```
+
+```{r}
+DimPlot(myeloid,group.by = "annotation",reduction = "tsne",label = T)
+```
+
+```{r}
+save(myeloid,file=paste0(outdir,"myeloid_V2p4.Robj"))
+```
+
+## 1.3 annotation of stromal cells (originally apart of full analysis)
+
+```{r}
+load(paste0(outdir,stromal_file))
+```
+
+```{r}
+Idents(stromal) <- stromal$RNA_snn_res.0.2
+```
+
+```{r}
+g <- VlnPlot(stromal,features = c("Fap","Col5a2","Il6","Has1","Clec3b","Spp1","Arhgdib","Tpm2","Myct1","Pecam1","H2-Ab1","Cd74","Acta2"),group.by = "RNA_snn_res.0.1")
+ggsave(filename = "stromal_res01_marker_VlnPlot.pdf", plot = g)
+```
+
+```{r}
+stromal@meta.data <- stromal@meta.data %>%
+  mutate(compartment = rep("stromal",nrow(stromal@meta.data)),
+    annotation_snn_res.0.1 = case_match(as.character(RNA_snn_res.0.1),
+    "0" ~ "iCAF",
+    "1" ~ "apCAF",
+    "2" ~ "EC",
+    "3" ~ "myCAF"
+  ),
+  celltype = case_match(
+    annotation_snn_res.0.1,
+    "iCAF" ~ "CAF",
+    "apCAF" ~ "CAF",
+    "EC" ~ "EC",
+    "myCAF" ~ "CAF"
+  ))
+```
+
+```{r}
+stromal@meta.data <- stromal@meta.data %>%
+  mutate(annotation_snn_res.0.2 = case_match(as.character(RNA_snn_res.0.2),
+    "0" ~ "iCAF_1",
+    "1" ~ "iCAF_2",
+    "2" ~ "iCAF_3",
+    "3" ~ "apCAF",
+    "4" ~ "EC",
+    "5" ~ "myCAF"
+  ))
+```
+
+```{r}
+save(stromal,file = paste0(outdir,stromal_file))
+```
+
+
+# Part 2 Optional: looking more into subsets
+
+```{r}
+load(paste0(outdir,"myeloid_V2p4.Robj"))
+```
+
+```{r}
+colnames(myeloid@meta.data)
+```
+
+
+```{r}
+table(myeloid$celltype)
+```
+
+## 3.1 create neutrophil subset and export gene of interest
+
+```{r}
+neutrophil <- subset(myeloid, subset = celltype == "Neutrophil")
+```
+
+We need to run the processing again for fair comparison:
+
+```{r}
+neutrophil <- FindVariableFeatures(object = neutrophil, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+
+VariableFeaturePlot(neutrophil)
+
+neutrophil <- ScaleData(object = neutrophil, features = VariableFeatures(object = neutrophil), vars.to.regress = c("nCount_RNA", "percent.mt"))
+neutrophil <- RunPCA(object = neutrophil,
+                features =  VariableFeatures(object = neutrophil),
+                dims = 1:50)
+gc()
+ElbowPlot(neutrophil,ndims = 50)
+neutrophil <- RunHarmony(object = neutrophil, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+neutrophil <- RunUMAP(neutrophil,dims = 1:20,reduction = "harmony")
+neutrophil <- RunTSNE(neutrophil,dims = 1:20,reduction = "harmony")
+
+
+neutrophil <- JoinLayers(neutrophil)
+#technically we don't need to recluster because we are interested in the already-labeled cell types
+neutrophil$RNA_snn_res.0.1 <- NULL
+neutrophil$RNA_snn_res.0.2 <- NULL
+neutrophil$RNA_snn_res.0.3 <- NULL
+neutrophil$RNA_snn_res.0.4 <- NULL
+neutrophil$RNA_snn_res.0.5 <- NULL
+neutrophil$RNA_snn_res.0.6 <- NULL
+neutrophil$RNA_snn_res.0.7 <- NULL
+neutrophil$RNA_snn_res.0.8 <- NULL
+neutrophil$RNA_snn_res.0.9 <- NULL
+neutrophil$RNA_snn_res.1 <- NULL
+```
+```{r}
+DimPlot(neutrophil,group.by = "annotation",label = T)
+```
+```{r}
+# note: inflam_id_genes include upregulated (Tnf,Icam1,Il1b,Cd14,Cd274,Il4ra,Tifa,Nfkbiz,F3) and downregulated genes (Cxcr4, Arrb1,Tsc22d4, Tsc22d3).
+inflam_id_genes <- c()
+VlnPlot(neutrophil,features = c("Tnf"),group.by = "annotation",split.by = "orig.ident",alpha = 0.2)
+VlnPlot(neutrophil,features = c("Icam1"),group.by = "annotation",split.by = "orig.ident",alpha = 0.2)
+VlnPlot(neutrophil,features = c("Il1b"),group.by = "annotation",split.by = "orig.ident",alpha = 0.2)
+VlnPlot(neutrophil,features = c("Cd274"),group.by = "annotation",split.by = "orig.ident",alpha = 0.2)
+VlnPlot(neutrophil,features = c("Cxcr4"),group.by = "annotation",split.by = "orig.ident",alpha = 0.2)
+VlnPlot(neutrophil,features = c("Arrb1"),group.by = "annotation",split.by = "orig.ident",alpha = 0.2)
+VlnPlot(neutrophil,features = c("Tsc22d4"),group.by = "annotation",split.by = "orig.ident",alpha = 0.2)
+
+# angiogenesis-related genes: Mmp9, S100a8,Vegfa, Mpo, Osm
+VlnPlot(neutrophil,features = c("Mmp9"),group.by = "annotation",split.by = "orig.ident",alpha = 0.2)
+VlnPlot(neutrophil,features = c("S100a8"),group.by = "annotation",split.by = "orig.ident",alpha = 0.2)
+VlnPlot(neutrophil,features = c("Vegfa"),group.by = "annotation",split.by = "orig.ident",alpha = 0.2)
+VlnPlot(neutrophil,features = c("Mpo"),group.by = "annotation",split.by = "orig.ident",alpha = 0.2)
+VlnPlot(neutrophil,features = c("Osm"),group.by = "annotation",split.by = "orig.ident",alpha = 0.2)
+```
+
+```{r}
+save(neutrophil,file=paste0(outdir,"neutrophil_V2p4.Robj"))
+```
+
+```{r}
+table(neutrophil$hashtag)
+```
+
+```{r}
+neutrophil_sp <- subset(neutrophil,subset = (hashtag == "Reporter-")|(hashtag == "Reporter+"))
+```
+
+```{r}
+neutrophil_sp <- FindVariableFeatures(object = neutrophil_sp, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+
+VariableFeaturePlot(neutrophil_sp)
+
+neutrophil_sp <- ScaleData(object = neutrophil_sp, features = VariableFeatures(object = neutrophil_sp), vars.to.regress = c("nCount_RNA", "percent.mt"))
+neutrophil_sp <- RunPCA(object = neutrophil_sp,
+                features =  VariableFeatures(object = neutrophil_sp),
+                dims = 1:50)
+gc()
+ElbowPlot(neutrophil_sp,ndims = 50)
+neutrophil_sp <- RunHarmony(object = neutrophil_sp, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+neutrophil_sp <- RunUMAP(neutrophil_sp,dims = 1:20,reduction = "harmony")
+neutrophil_sp <- RunTSNE(neutrophil_sp,dims = 1:20,reduction = "harmony")
+
+
+neutrophil_sp <- JoinLayers(neutrophil_sp)
+```
+
+
+```{r}
+save(neutrophil_sp,file=paste0(outdir,"neutrophil_V2p4_sp.Robj"))
+```
+
+
+```{r}
+neutrophil_sp@assays$RNA@layers$data
+```
+
+```{r}
+avg_by_sample <- AggregateExpression(neutrophil_sp,features = c("Tnf","Icam1","Il1b","Cd14","Cd274","Il4ra","Tifa","Nfkbiz","F3","Cxcr4", "Arrb1","Tsc22d4", "Tsc22d3","Mmp9", "S100a8","Vegfa", "Mpo", "Osm"),group.by = c("annotation","orig.ident"),assays = "RNA", return.seurat = T)
+```
+
+```{r}
+avg_by_sample$orig.ident <- rep(c("Control","ZBTB46"),3)
+avg_by_sample$annotation <- c(rep("Neutrophil_1",2),rep("Neutrophil_2",2),rep("Neutrophil_3",2))
+```
+
+
+```{r}
+as.data.frame(t(avg_by_sample[["RNA"]]$scale.data))
+```
+
+```{r}
+unname(as.data.frame(avg_by_sample$orig.ident))
+```
+
+
+```{r}
+neu_table_by_sample <- data.frame(sample = unname(as.data.frame(avg_by_sample$orig.ident)),annotation = unname(as.data.frame(avg_by_sample$annotation)))
+neu_table_by_sample <- cbind(neu_table_by_sample,as.data.frame(t(avg_by_sample[["RNA"]]$scale.data)))
+```
+
+```{r}
+write.table(neu_table_by_sample,file = paste0(outdir,"neutrophil_average_exp_by_sample_table.tsv"),sep = "\t",quote = F,row.names = F)
+```
+
+Repeat for the conditions.
+
+```{r}
+avg_by_cond <- AggregateExpression(neutrophil_sp,features = c("Tnf","Icam1","Il1b","Cd14","Cd274","Il4ra","Tifa","Nfkbiz","F3","Cxcr4", "Arrb1","Tsc22d4", "Tsc22d3","Mmp9", "S100a8","Vegfa", "Mpo", "Osm"),group.by = c("annotation","orig.ident","hashtag"),assays = "RNA", return.seurat = T)
+```
+
+```{r}
+unname(avg_by_cond$orig.ident)
+```
+
+```{r}
+avg_by_cond$hashtag <-  rep(c("Reporter-","Reporter+"),6)
+avg_by_cond$orig.ident <- rep(c(rep("Control",2),rep("ZBTB46",2)),3)
+avg_by_cond$annotation <- c(rep("Neutrophil_1",4),rep("Neutrophil_2",4),rep("Neutrophil_3",4))
+```
+
+```{r}
+neu_table_by_cond <- data.frame(sample = unname(as.data.frame(avg_by_cond$orig.ident)),hashtag = unname(as.data.frame(avg_by_cond$hashtag)), annotation = unname(as.data.frame(avg_by_cond$annotation)))
+neu_table_by_cond <- cbind(neu_table_by_cond,as.data.frame(t(avg_by_cond[["RNA"]]$scale.data)))
+```
+
+```{r}
+write.table(neu_table_by_cond,file = paste0(outdir,"neutrophil_average_exp_by_condition_table.tsv"),sep = "\t",quote = F,row.names = F)
+```
+
+## 3.2 shift gear to Itgax+ Xcr1+ myeloids
+
+```{r}
+table(myeloid$annotation)
+```
+
+```{r}
+VlnPlot(myeloid,features = c("Xcr1"),group.by = "RNA_snn_res.0.7")+RotatedAxis()
+VlnPlot(myeloid,features = c("Xcr1"),group.by = "annotation")+RotatedAxis()
+VlnPlot(myeloid,features = c("Itgax"),group.by = "RNA_snn_res.0.7",alpha = 0.2)+RotatedAxis()
+# c15: cDC1
+# c2: Mono/mac_3: Mertk+ Ccr2- Arg- M2-like 
+# c7: proliferating
+# since annotation was made using Res07 clusters, using the cluster number may be more straightforward
+# Xcr1+ : 1,10,11,13,14,15,16,2,3,4,5, 6, 7,8,9
+# Itgax+: c(0:17)
+```
+```{r}
+intersect(x = c(1,10,11,13,14,15,16,2,3,4,5, 6,7,8,9), y = c(0:17))
+```
+
+```{r}
+Idents(myeloid) <- as.numeric(myeloid$RNA_snn_res.0.7)
+Itgax_Xcr1 <- subset(myeloid,idents = intersect(x = c(1,10,11,13,14,15,16,2,3,4,5, 6,7,8,9), y = c(0:17)))
+```
+
+```{r}
+g <- DotPlot(Itgax_Xcr1,features = c("Xcr1","Itgax","Btf3","Zbtb46"),group.by = "annotation",dot.scale = 10,split.by = "hashtag",cols = c("blue","green","orange","purple"))+RotatedAxis()
+ggsave(filename = paste0(outdir,"Itgax_Xcr1_dotplot_split_by_hashtag.pdf"),plot = g,units = "cm",width = 30,height = 20)
+```
+
+```{r}
+save(Itgax_Xcr1,file = paste0(outdir,"Itgax_Xcr1_V2p4.Robj"))
+```
+
+```{r}
+Itgax_Xcr1 <- subset(Itgax_Xcr1,subset = (hashtag == "Reporter+") | (hashtag == "Reporter-"))
+```
+
+```{r}
+DotPlot(Itgax_Xcr1,features = c("Xcr1","Itgax","Btf3","Zbtb46"), dot.scale = 10,scale.by = "size",group.by = "annotation",split.by = "orig.ident")+RotatedAxis()
+```
+
+
+```{r}
+g <- DotPlot(Itgax_Xcr1,features = c("Xcr1","Itgax","Btf3","Zbtb46"),group.by = "annotation", dot.scale = 10,split.by = "hashtag",scale.by = "size",cols = c("orange","purple"))+RotatedAxis()
+ggsave(filename = paste0(outdir,"Itgax_Xcr1_sp_dotplot_split_by_hashtag.pdf"),plot = g,units = "cm",width = 30,height = 20)
+```
+
+```{r}
+g <- DotPlot(Itgax_Xcr1,features = c("Xcr1","Itgax","Btf3","Zbtb46"),group.by = "annotation", dot.scale = 10,split.by = "orig.ident",scale.by = "size",cols = c("orange","purple"))+RotatedAxis()
+ggsave(filename = paste0(outdir,"Itgax_Xcr1_sp_dotplot_split_by_sample.pdf"),plot = g,units = "cm",width = 30,height = 20)
+```
+
+
+```{r}
+save(Itgax_Xcr1,file = paste0(outdir,"Itgax_Xcr1_V2p4_sp.Robj"))
+```
+
+## 3.3 Zoom into c2 and c7
+I'll include c15 as a reference
+
+```{r}
+Xcr1_high_mye <- subset(myeloid,idents = c(2,7,15))
+```
+
+```{r}
+Xcr1_high_mye <- FindVariableFeatures(object = Xcr1_high_mye, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+
+VariableFeaturePlot(Xcr1_high_mye)
+
+Xcr1_high_mye <- ScaleData(object = Xcr1_high_mye, features = VariableFeatures(object = Xcr1_high_mye), vars.to.regress = c("nCount_RNA", "percent.mt"))
+Xcr1_high_mye <- RunPCA(object = Xcr1_high_mye,
+                features =  VariableFeatures(object = Xcr1_high_mye),
+                dims = 1:50)
+gc()
+ElbowPlot(Xcr1_high_mye,ndims = 50)
+Xcr1_high_mye <- RunHarmony(object = Xcr1_high_mye, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+Xcr1_high_mye <- RunUMAP(Xcr1_high_mye,dims = 1:20,reduction = "harmony")
+Xcr1_high_mye <- RunTSNE(Xcr1_high_mye,dims = 1:20,reduction = "harmony")
+
+Xcr1_high_mye <- FindNeighbors(Xcr1_high_mye, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  Xcr1_high_mye <- FindClusters(object = Xcr1_high_mye, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+Xcr1_high_mye <- JoinLayers(Xcr1_high_mye)
+```
+
+```{r}
+DimPlot(Xcr1_high_mye,group.by = "annotation",label = T)
+DimPlot(Xcr1_high_mye,group.by = "RNA_snn_res.0.1",label = T)
+DimPlot(Xcr1_high_mye,group.by = "RNA_snn_res.1",label = T)
+Idents(Xcr1_high_mye) <- Xcr1_high_mye$annotation
+FeaturePlot(Xcr1_high_mye,features = c("Xcr1"),label = T)
+FeaturePlot(Xcr1_high_mye,features = c("Zbtb46"),label = T)
+FeaturePlot(Xcr1_high_mye,features = c("Itgax"),label = T)
+```
+
+```{r}
+DotPlot(Xcr1_high_mye,features = c("Xcr1","Itgax","Btf3","Zbtb46"),group.by = "annotation", dot.scale = 10,split.by = "orig.ident",cols = c("purple","cyan"),scale.by = "size")+RotatedAxis()
+table(Xcr1_high_mye$hashtag)
+VlnPlot(Xcr1_high_mye,features = "Xcr1",group.by = "annotation",split.by = "orig.ident")
+```
+
+```{r}
+save(Xcr1_high_mye,file = paste0(outdir,"Xcr1_high_myeloid_V2p4.Robj"))
+```
+
+
+```{r}
+Xcr1_high_mye <- subset(Xcr1_high_mye,subset = (hashtag == "Reporter+") | (hashtag == "Reporter-"))
+```
+
+
+```{r}
+save(Xcr1_high_mye,file = paste0(outdir,"Xcr1_high_myeloid_V2p4_sp.Robj"))
+```
+
+```{r}
+DotPlot(Xcr1_high_mye,features = c("Xcr1","Itgax","Btf3","Zbtb46"),group.by = "annotation", dot.scale = 10,split.by = "orig.ident",cols = c("purple","cyan"),scale.by = "size")+RotatedAxis()
+DotPlot(Xcr1_high_mye,features = c("Xcr1","Itgax","Btf3","Zbtb46"),group.by = "annotation", dot.scale = 10,split.by = "hashtag",cols = c("purple","cyan"),scale.by = "size")+RotatedAxis()
+```
+
+
+
+

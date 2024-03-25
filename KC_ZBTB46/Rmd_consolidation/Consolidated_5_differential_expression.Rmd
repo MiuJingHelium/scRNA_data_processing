@@ -1,0 +1,273 @@
+---
+title: "Within-cluster DE"
+output: html_document
+date: "2024-03-19"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(data.table)
+library(MAST) # for DE
+library(EnhancedVolcano) # for Volcano plot
+```
+
+**Note**: Cross-condition DE is originally performed using R scripts. This Rmd shows one example.
+
+# Part 1: Within-cell type DE
+
+**Note**: This part is dependent on settlement of cell type definition and preliminary annotation.
+
+## 1.1 load whole object
+
+For the simplicity of object loading, only the whole object is loaded. Subset will be created using the cell type label.
+
+```{r}
+indir = "./R_outs/"
+outdir = "./R_outs/"
+```
+
+```{r}
+load(paste0(outdir,"whole_V2p4.Robj"))
+```
+
+## 1.2 DE of subsets
+
+### 1.2.1 perform DE among CAF
+
+```{r}
+CAF <- subset(whole,subset = celltype == "CAF")
+```
+
+```{r}
+table(CAF$annotation)
+```
+
+
+```{r}
+Idents(CAF) <- CAF$annotation
+CAF_markers <- FindAllMarkers(CAF)
+```
+
+```{r}
+write.table(CAF_markers,
+              paste0(outdir,"CAF_annotation_markers.tsv"),
+              sep="\t",
+              quote=F,
+              row.names=F)
+```
+
+
+### 1.2.2 DE among DC
+
+```{r}
+DC <- subset(whole,subset = celltype == "DC")
+table(DC$annotation)
+```
+
+```{r}
+Idents(DC) <- DC$annotation
+
+markers <- FindAllMarkers(DC)
+
+write.table(markers,
+              paste0(outdir,"DC_annotation_markers.tsv"),
+              sep="\t",
+              quote=F,
+              row.names=F)
+```
+
+### 1.2.3 DE Neutrophils
+
+```{r}
+Neutrophil <- subset(whole,subset = celltype == "Neutrophil")
+table(Neutrophil$annotation)
+```
+
+```{r}
+Idents(Neutrophil) <- Neutrophil$annotation
+
+markers <- FindAllMarkers(Neutrophil)
+
+write.table(markers,
+              paste0(outdir,"Neutrophil_annotation_markers.tsv"),
+              sep="\t",
+              quote=F,
+              row.names=F)
+```
+
+### 1.2.4 DE among mono/mac
+
+```{r}
+mono_mac <- subset(whole,subset = celltype == "Mono/Mac")
+
+```
+
+```{r}
+table(mono_mac$annotation_V2)
+```
+
+
+```{r}
+Idents(mono_mac) <- mono_mac$annotation_V2
+
+markers <- FindAllMarkers(mono_mac)
+
+write.table(markers,
+              paste0(outdir,"mono_mac_annotation_markers_V2.tsv"),
+              sep="\t",
+              quote=F,
+              row.names=F)
+```
+
+### 1.2.5 DE of lymphoid cell types
+
+
+```{r}
+NK <- subset(whole, subset = celltype == "NK")
+T_cell <- subset(whole, subset = celltype == "T cell")
+```
+
+```{r}
+Idents(NK) <- NK$annotation
+NK_markers <- FindAllMarkers(NK)
+write.table(NK_markers,file = paste0(outdir,"NK_annotation_markers.tsv"),sep = "\t",row.names = F)
+```
+
+
+```{r}
+Idents(T_cell) <- T_cell$annotation
+T_cell_markers <- FindAllMarkers(T_cell)
+write.table(T_cell_markers,file = file = paste0(outdir,"T_cell_annotation_markers.tsv"),sep = "\t",row.names = F)
+```
+
+
+# Part 2: Cross-condition DE for a list of clusters within an object
+
+**Note**: the name of the object is hard-coded, so whenever the object changes, the object name needs to be updated.
+
+Be aware of the annotation/identity classes that you are iterating the DE over.
+
+## 2.1 define function
+
+```{r}
+de_clusters <- function(current_cluster) {
+  groups <- paste0(conditions,"_",current_cluster)
+  both_markers <- FindMarkers(neutrophil, ident.1=groups[2], ident.2=groups[1], test.use="MAST", min.pct=0.00, logfc.threshold = 0) # change name of object 
+  marker_genes <- row.names(both_markers)
+  mutate(both_markers, gene = marker_genes, cluster = current_cluster)
+
+}
+```
+
+## 2.2 prepare object
+
+```{r}
+neutrophil$group <- gsub(" ","_",paste0(neutrophil$orig.ident,"_",neutrophil$celltype))
+conditions <- unique(neutrophil$orig.ident)
+clusters <- "Neutrophil"
+plts <- list()
+padj_thres = 10e-2
+log2FC_thres = 1
+Idents(neutrophil) <- neutrophil$group
+```
+
+## 2.3 run DE over a list of clusters
+
+```{r}
+for (i in clusters) {
+  output_file <- paste0(outdir,paste0('ZBTB46_vs_Control_', i, '.tsv'))
+  output_file_flt <- paste0(outdir,paste0('ZBTB46_vs_Control_', i, '_filtered.tsv'))
+  de_results_tbl <- lapply(i, de_clusters) 
+  de_results_tbl <- de_results_tbl %>% bind_rows() %>%
+			arrange(desc(abs(avg_log2FC))) %>%
+			mutate(threshold = case_when(
+			(p_val_adj < padj_thres) & (abs(avg_log2FC) > log2FC_thres) ~ "Pass",
+			.default = "Fail"
+			))
+  write.table(de_results_tbl, output_file,sep="\t",row.names=T)
+  
+  de_results_tbl <- de_results_tbl %>% 
+			filter(p_val_adj < padj_thres) %>%
+			filter(abs(avg_log2FC) > log2FC_thres)
+			
+  write.table(de_results_tbl, output_file_flt,sep="\t",row.names=T)
+}
+ 
+```
+
+# Part 3 summary and visualization of cross-condition DE
+
+Since across cluster DE is performed one v.s multiple, the summary and visualization is not as straightforward as those for cross-condition DE.
+
+These are just demonstrations.
+
+## 3.1 count number of DE in each cluster
+
+```{r}
+indir <- "R_outs"
+outdir <- "R_outs"
+```
+
+```{r}
+lym.DE.files <- list.files(path = "R_outs",pattern = "ZBTB46_vs_Control_lymphoid")
+i = 1
+clust_name <- gsub(".tsv","",gsub("ZBTB46_vs_Control_lymphoid","",lym.DE.files[i*2]))
+```
+
+```{r define helper function}
+calculate_n_DE <- function(file_list,celltype){
+  n_clust <- (length(file_list))/2
+  # ideally we want to do apply, but I'm dumb, so I'll do it in a less elegant way
+  cluster <- character(n_clust)
+  total <- integer(n_clust)
+  filtered <- integer(n_clust)
+  for (i in seq(1:n_clust)){
+    clust_name[i] <- gsub("_|.tsv","",gsub(paste0("ZBTB46_vs_Control_",celltype),"",file_list[i*2]))
+    #clust name automatically detected. unfiltered ones are expected to be the even-numbered item of the vector
+    total[i] <- nrow(read.table(paste0(indir,"/",file_list[i*2]),sep = "\t" ))
+    filtered[i] <- nrow(read.table(paste0(indir,"/",file_list[i*2-1]),sep = "\t" ))
+
+    
+  }
+  return(n_DE_DF <- data.frame(cluster = clust_name,n_total = total,n_pass = filtered))
+}
+```
+
+```{r generate results}
+n_DE_lym <- calculate_n_DE(lym.DE.files,"lymphoid")
+
+ggplot(n_DE_lym,aes(x=reorder(cluster, as.integer(cluster)),y=n_pass))+
+  geom_bar(stat = "identity", position = 'dodge')+xlab("cluster number")+ylab("number of DE genes with padj < 0.01")+ggtitle("lymphoid at resolution 0.6")
+```
+
+
+## 3.2 make volcano plot
+
+```{r load cross-condition DE result}
+# You'll need to load all results
+DE_df <- read.table(paste0(outdir,"ZBTB46_vs_Control_stromal_0.tsv"),header = T)
+```
+
+```{r enhanced volcano plot}
+EnhancedVolcano(DE_df,
+    lab = rownames(DE_df),
+    x = 'avg_log2FC',
+    y = 'p_val_adj',
+    pCutoff = 1e-2,
+    ylab = "adjusted P-value")
+g <- EnhancedVolcano(DE_df,
+    lab = rownames(DE_df),
+    x = 'avg_log2FC',
+    y = 'p_val_adj',
+    pCutoff = 1e-2,
+    ylab = "adjusted P-value",
+    title = "Treatment v.s. Control")
+
+ggsave(filename =  "Stromal_volcano_res02_c0.pdf",plot = g, units = "cm",height = 20,width = 15)
+```
+
+
+
+
+

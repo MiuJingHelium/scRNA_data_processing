@@ -1,0 +1,1350 @@
+---
+title: "ZBTB46 in TME analysis"
+output: html_document
+---
+
+Dedicated to data analysis after dataset cleaning.
+
+```{r load Package}
+library(Seurat)
+library(tidyverse)
+library(data.table)
+library(MAST)
+# library(presto) alternative DE; not available on CRAN or Bioconductor
+library(msigdbr)
+library(fgsea)
+#library(ReactomeGSA)
+library(gridExtra)
+library(viridis)
+library(RColorBrewer)
+library(pheatmap)
+library(org.Mm.eg.db)
+#  library(EnhancedVolcano)
+library(clusterProfiler)
+```
+
+### The following is for another project
+but the code should provide some ideas of adjusting the visualization
+```{r}
+plotData <- (jsonlite::fromJSON(file.path("/home/carisa/wustl/monocle","plot_data.json"))$data) %>% 
+  as.data.frame
+```
+
+```{r}
+table(plotData$Sample)
+```
+
+```{r}
+monocle_palette <- brewer.pal(n = 8, name = "Set1")[c(1,4,2)]
+```
+
+```{r}
+plotData$condition <- plotData$Sample %>% case_match(
+  "KO_ctrl_Female" ~ "KO CTRL",
+  "KO_cysf_Female" ~ "KO CysF",
+  "WT_ctrl_Female" ~ "WT CTRL",
+  "WT_cysf_Female" ~ "WT CysF"
+)
+```
+
+
+```{r}
+g <- ggplot(plotData,aes(x = data_dim_1,y = data_dim_2,color = as.factor(seurat_clusters)))+
+  geom_point()+
+  facet_grid(~condition)+theme_classic()+scale_color_manual(values = monocle_palette)+ guides(color=guide_legend(title="Cluster"))
+g
+ggsave("monocle_updated_plot.pdf",plot = g, units = "cm",height = 20,width = 60)
+```
+```{r}
+g <- plotData %>% filter(condition == "KO CTRL" | condition == "KO CysF") %>% ggplot(aes(x = data_dim_1,y = data_dim_2,color = as.factor(seurat_clusters)))+
+  geom_point(size = 0.8)+
+  facet_grid(~condition)+ theme_classic()+theme(strip.background = element_blank(),strip.placement = "outside",axis.title = element_blank())+scale_color_manual(values = monocle_palette)+ guides(color=guide_legend(title="Cluster",override.aes=list(fill=NA)))+xlab("Monocle dim 1") +ylab("Monocle dim 2")
+g
+ggsave("monocle_updated_plot_KO.pdf",plot = g, units = "cm",height = 10,width = 20)
+```
+
+
+
+### Part 0 preparation
+```{r define key constants}
+mypalette <- c(brewer.pal(n = 8, name = "YlOrRd")[3:8],brewer.pal(n = 8, name = "YlGnBu")[5:8],brewer.pal(n = 8, name = "YlOrBr")[5:8],brewer.pal(n = 8, name = "YlGn")[4:8],brewer.pal(n = 8, name = "YlOrBr")[5:8],brewer.pal(n = 8, name = "Purples")[3:8],brewer.pal(n = 8, name = "Greys")[3:7],brewer.pal(n = 8, name = "PuRd")[3:8])
+indir = "./"
+outdir = "./"
+#whole_dataset_file = "whole_processed_wHarmony.Robj"
+myeloid_file = "myeloid_V2.Robj"
+lymphoid_file = "lymphoid_V2.Robj"
+stromal_file = "stromal_V2.Robj"
+```
+
+```{r}
+lym.DE.files <- list.files(path = "./",pattern = "ZBTB46_vs_Control_lymphoid")
+mye.DE.files <- list.files(path = "./",pattern = "ZBTB46_vs_Control_myeloid")
+str.DE.files <- list.files(path = "./",pattern = "ZBTB46_vs_Control_stromal")
+```
+
+
+```{r helper function}
+plot_HallmarkGSEA <- function(cluster_list,seurat_obj,by.meta){
+  n <- length(cluster_list)
+  plts <- list(n)
+  DE <- wilcoxauc(seurat_obj, by.meta)
+  for (i in seq(1:n)){
+    cluster_DE_genes<- DE %>%
+    dplyr::filter(group == cluster_list[i]) %>%
+    arrange(desc(auc)) %>%
+    dplyr::select(feature, auc)
+    ranks<- deframe(cluster_DE_genes)
+    fgseaRes <- fgseaMultilevel(fgsea_sets_Hallmark, stats = ranks,scoreType = "pos",eps = 0)
+    fgseaResTidy <- fgseaRes %>%
+      as_tibble() %>%
+      arrange(desc(NES))
+    ggplot(fgseaResTidy %>% filter(padj < 0.001) %>% head(n= 20), aes(reorder(pathway, NES), NES)) +
+    geom_col(aes(fill= NES < 7.5)) +
+    coord_flip() +
+    labs(x="Hallmark Pathway", y="Normalized Enrichment Score",
+       title=paste0("cluster ",cluster_list[i])) +
+    theme_minimal()
+    plts[[i]] <- ggplot(fgseaResTidy %>% filter(padj < 0.001) %>% head(n= 20), aes(reorder(pathway, NES), NES)) +
+    geom_col(aes(fill= NES < 7.5)) +
+    coord_flip() +
+    labs(x="Hallmark Pathway", y="Normalized Enrichment Score",
+       title=paste0("cluster ",cluster_list[i])) +
+    theme_minimal()
+  }
+  return(plts)
+}
+
+plot_OntoGSEA <- function(cluster_list,seurat_obj,by.meta){
+  n <- length(cluster_list)
+  plts <- list(n)
+  DE <- wilcoxauc(seurat_obj, by.meta)
+  for (i in seq(1:n)){
+    cluster_DE_genes<- DE %>%
+    dplyr::filter(group == cluster_list[i]) %>%
+    arrange(desc(auc)) %>%
+    dplyr::select(feature, auc)
+    ranks<- deframe(cluster_DE_genes)
+    fgseaRes <- fgseaMultilevel(fgsea_sets_Onto, stats = ranks,scoreType = "pos",eps = 0)
+    fgseaResTidy <- fgseaRes %>%
+      as_tibble() %>%
+      arrange(desc(NES))
+    ggplot(fgseaResTidy %>% filter(padj < 0.001) %>% head(n= 20), aes(reorder(pathway, NES), NES)) +
+    geom_col(aes(fill= NES < 7.5)) +
+    coord_flip() +
+    labs(x="Ontology", y="Normalized Enrichment Score",
+       title=paste0("cluster ",cluster_list[i])) +
+    theme_minimal()
+    plts[[i]] <- ggplot(fgseaResTidy %>% filter(padj < 0.001) %>% head(n= 20), aes(reorder(pathway, NES), NES)) +
+    geom_col(aes(fill= NES < 7.5)) +
+    coord_flip() +
+    labs(x="Ontology", y="Normalized Enrichment Score",
+       title=paste0("cluster ",cluster_list[i])) +
+    theme_minimal()
+  }
+  return(plts)
+}
+
+calculate_n_DE <- function(file_list,celltype){
+  n_clust <- (length(file_list))/2
+  # ideally we want to do apply, but I'm dumb, so I'll do it in a less elegant way
+  clust_name <- character(n_clust)
+  total <- integer(n_clust)
+  filtered <- integer(n_clust)
+  for (i in seq(1:n_clust)){
+    clust_name[i] <- gsub("_|.tsv","",gsub(paste0("ZBTB46_vs_Control_",celltype),"",file_list[i*2]))
+    #clust name automatically detected. unfiltered ones are expected to be the even-numbered item of the vector
+    total[i] <- nrow(read.table(paste0(indir,"/",file_list[i*2]),sep = "\t" ))
+    filtered[i] <- nrow(read.table(paste0(indir,"/",file_list[i*2-1]),sep = "\t" ))
+
+    
+  }
+  return(n_DE_DF <- data.frame(cluster = clust_name,n_total = total,n_pass = filtered))
+}
+```
+
+
+
+
+
+### Part 1 Whole datatset
+
+```{r}
+load(paste0(outdir,whole_dataset_file))
+```
+
+```{r}
+DotPlot(whole, group.by = "RNA_snn_res.0.6",features = c("Adgre1","S100a8","Flt3","Xcr1","Sirpa","Siglech","Cd200r3","Tpsb2","Mki67","Cd3e","Ncr1","Pecam1","Myct1","Col5a2"))+ RotatedAxis()
+```
+
+```{r}
+whole@meta.data <- whole@meta.data %>% 
+  mutate(annotation_main = case_match(
+    as.character(RNA_snn_res.0.6),
+    "0" ~ "Mono/Mac",
+    "1" ~ "Mono/Mac",
+    "2" ~ "NK",
+    "3" ~ "Mono/Mac",
+    "4" ~ "Mono/Mac",
+    "5" ~ "Neutrophil",
+    "6" ~ "Mono/Mac",
+    "7" ~ "Cycling Mono/Mac",
+    "8" ~ "Fibroblast",
+    "9" ~ "T cells",
+    "10" ~ "Mono/Mac",
+    "11" ~ "cDC2",
+    "12" ~ "Mast cells",
+    "13" ~ "Cycling NK",
+    "14" ~ "cDC2",
+    "15" ~ "cDC1",
+    "16" ~ "pDC",
+    "17" ~ "Mono/Mac",
+    "18" ~ "EC"
+  ) )
+```
+
+
+
+#### 1.1 DimPlots: all clusters(with annotation) + split by conditions
+
+```{r}
+#change resolution if necessary
+compartment <- as.character(whole$RNA_snn_res.0.6) %>%
+  case_match(
+    c("0","1","3","4","5","6","7","10","11","12","14","15","16","17") ~ "myeloid",
+    c("2","9","13") ~ "lymphoid",
+    c("8","18") ~ "stromal"
+  )
+whole$compartment <- compartment
+```
+
+
+```{r}
+save(whole,file = paste0(outdir,whole_dataset_file))
+```
+
+```{r}
+#change resolution if necessary
+compartment <- as.character(whole$RNA_snn_res.0.1) %>%
+  case_match(
+    c("0","2","3","6","7") ~ "myeloid",
+    c("1","5") ~ "lymphoid",
+    c("4","8") ~ "stromal"
+  )
+whole$compartment <- compartment
+```
+
+
+```{r}
+p1 <- DimPlot(whole, reduction = "tsne", group.by = "annotation_main",label = T)+ guides(color = guide_legend(override.aes = list(size=4), ncol=2) )
+p2 <- DimPlot(whole, reduction = "tsne", split.by = "orig.ident", label = T)+ guides(color = guide_legend(override.aes = list(size=4), ncol=2) )
+p3 <- DimPlot(whole, reduction = "tsne",group.by = "compartment",label = T,split.by = "orig.ident")
+g <- grid.arrange(grobs = list(p1,p2,p3),nrow = 2)
+ggsave(filename = paste0(outdir,"Whole_DimPlots.pdf"), plot = g, units = "cm",height = 20,width = 40)
+```
+
+
+#### 1.2 FeaturePlots, DotPlots, heatmaps
+```{r}
+
+p2 <- DotPlot(whole,features = c("Ptprc","Cd3d","Cd3e","Ncr1","Gnly","Xcl1","Klrc1","Cd14","Lyz1","Lyz2","Ms4a1","Cd79a","Mzb1","Jchain","Tpsb2","Tpsab1","Col1a1","Col5a2","Plvap","Vegfa","Pecam1","Myct1","Mki67"))+RotatedAxis()
+ggsave(filename = paste0(outdir,"Whole_FeatureDotPlots.pdf"), plot = p2, units = "cm",height = 20,width = 40)
+```
+
+
+```{r}
+# define top markers or key markers
+top_markers <- read.csv(paste0(outdir,"top_markers_res06.csv"))
+
+# Ident to desirable resolution
+Idents(whole) <- whole$RNA_snn_res.0.6
+
+
+avg.exp <- AverageExpression(whole, assays = "RNA",features = top_markers$gene,return.seurat = T)
+
+g <- DoHeatmap(avg.exp,features = top_markers$gene,draw.lines = F)
+ggsave(filename = paste0(outdir,"Whole_heatmap_topmarkers.pdf"), plot = g, units = "cm",height = 30,width = 20)
+```
+
+
+#### 1.3 Proportion difference
+
+
+```{r}
+#
+cluster_prop_comp <- whole@meta.data %>% group_by(orig.ident,compartment) %>%
+  summarise(n = n()) %>% mutate(proportion = 100*n/sum(n))
+
+cluster_ratio_comp <- cluster_prop_comp %>% group_by(compartment) %>%
+   mutate(ratio = proportion[orig.ident == "ZBTB46"]/proportion[orig.ident == "Control"])
+
+p1 <- ggplot(cluster_prop_comp,aes(x = orig.ident, y = proportion,fill = orig.ident))+
+  geom_bar(stat = "identity", position = 'dodge')+
+  facet_wrap(~compartment,scales = "free")+guides(fill=guide_legend(title="Condition"))+ ylab("Percentage of all cells")+
+  theme(
+  plot.title = element_blank(),
+  axis.title.x = element_blank())+RotatedAxis()
+p2 <- ggplot(cluster_ratio_comp,aes(x = reorder(compartment,-log2(ratio)), y = log2(ratio),fill= compartment))+
+  geom_bar(stat = "identity")+ scale_fill_manual(values=mypalette) +theme_grey()+theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ guides(fill=guide_legend(ncol=2,title="Cluster")) + xlab("Clusters") + ylab("log 2 ZBTB46 proportion/Control proportion")
+g <- gridExtra::grid.arrange(grobs = list(p1,p2),nrow = 2)
+ggsave(filename = paste0(outdir,"Proportion_barplots_major_compartment.pdf"), plot = g, units = "cm",height = 30,width = 20)
+
+```
+
+```{r}
+cluster_prop <- whole@meta.data %>% group_by(orig.ident,annotation_main) %>%
+  summarise(n = n()) %>% mutate(proportion = n/sum(n))
+cluster_ratio <- cluster_prop %>% group_by(annotation_main) %>%
+   mutate(ratio = proportion[orig.ident == "ZBTB46"]/proportion[orig.ident == "Control"])
+p1 <- ggplot(cluster_prop,aes(x = orig.ident, y = proportion,fill = orig.ident))+
+  geom_bar(stat = "identity", position = 'dodge')+
+  facet_wrap(~annotation_main,scales = "free")+guides(fill=guide_legend(title="Condition"))+ 
+  theme(
+  plot.title = element_blank(),
+  axis.title.x = element_blank())+RotatedAxis()
+p2 <- ggplot(cluster_ratio,aes(x = reorder(annotation_main,-log2(ratio)), y = log2(ratio),fill= annotation_main))+
+  geom_bar(stat = "identity")+ scale_fill_manual(values=mypalette) +theme_grey()+theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ guides(fill=guide_legend(ncol=2,title="Cluster")) + xlab("Clusters") + ylab("log 2 ZBTB46 proportion/Control proportion")
+g <- grid.arrange(grobs = list(p1,p2),nrow = 2)
+ggsave(filename = paste0(outdir,"Proportion_barplots_whole.pdf"), plot = g, units = "cm",height = 30,width = 20)
+```
+
+
+#### 1.4 Overview by hashtag
+
+```{r}
+#for hashtag, may need to show only signal positive ones
+g <- DimPlot(whole, group.by="annotation_main", split.by = "hashtag",label=T)+ guides(color = guide_legend(override.aes = list(size=4), ncol=2) )
+ggsave(filename = paste0(outdir,"Hashtag_Dimplot_whole.pdf"), plot = g, units = "cm",height = 30,width = 20)
+```
+
+
+
+```{r}
+rm(whole)
+```
+
+
+### Part 2 myeloid compartment
+
+```{r}
+load(paste0(outdir,myeloid_file))
+```
+
+#### 2.0 prepare annotation
+
+```{r}
+DimPlot(myeloid, reduction = "tsne", group.by = "RNA_snn_res.0.1",label = T)+ guides(color = guide_legend(override.aes = list(size=4), ncol=2))
+```
+```{r}
+DotPlot(myeloid,features = c("Adgre1","S100a8","Flt3","Xcr1","Sirpa","Siglech","Cd200r3","Tpsb2","Tpsab1","Mki67"),group.by = "RNA_snn_res.0.1")+RotatedAxis()
+```
+
+```{r}
+myeloid@meta.data <- myeloid@meta.data %>% 
+  mutate(RNA_snn_res.0.1 = as.character(RNA_snn_res.0.1)) %>%
+  mutate(annotation_snn_res.0.1 = case_match(RNA_snn_res.0.1,
+    "0" ~ "monocyte/macrophage",
+    "1" ~ "neutrophil",
+    "2" ~ "cDC",
+    "3" ~ "proliferating mono/mac",
+    "4" ~ "mast cells",
+    "5" ~ "pDC"
+  ))
+```
+
+```{r}
+head(myeloid@meta.data)
+```
+
+
+```{r}
+save(myeloid,file = paste0(outdir,myeloid_file))
+```
+
+```{r}
+p1 <- DimPlot(myeloid, reduction = "tsne", group.by = "RNA_snn_res.0.1",label = T)+ guides(color = guide_legend(override.aes = list(size=4), ncol=2))
+p2 <- DotPlot(myeloid,features = c("Adgre1","S100a8","Flt3","Xcr1","Sirpa","Siglech","Cd200r3","Tpsb2","Tpsab1","Mki67"),group.by = "RNA_snn_res.0.1")+RotatedAxis()
+p3 <- DotPlot(myeloid,features = c("Adgre1","S100a8","Flt3","Xcr1","Sirpa","Siglech","Cd200r3","Tpsb2","Tpsab1","Mki67"),group.by = "annotation_snn_res.0.1")+RotatedAxis()
+g <- grid.arrange(grobs = list(p1,p2,p3),nrow = 2)
+ggsave(filename = "myeloid_annotation_res01_plots.pdf",plot = g, units = "cm",height = 30,width = 40)
+```
+
+#### 2.1 DimPlots: all clusters(with annotation) + split by conditions/hashtag
+```{r}
+p1 <- DimPlot(myeloid, reduction = "tsne", group.by = "annotation_snn_res.0.1")
+ggsave(filename = paste0(outdir,"Myeloid_DimPlot_ann01.pdf"), plot = p1, units = "cm",height = 25,width = 25)
+p2 <- DimPlot(myeloid, reduction = "tsne", split.by = "orig.ident", label = T)+ guides(color = guide_legend(override.aes = list(size=4), ncol=2) )
+ggsave(filename = paste0(outdir,"Myeloid_DimPlot_res1_cond_split.pdf"), plot = p2, units = "cm",height = 15,width = 30)
+p3 <-  DimPlot(myeloid, reduction = "tsne",group.by="annotation_snn_res.0.1", split.by = "hashtag",ncol = 2)
+ggsave(filename = paste0(outdir,"Myeloid_DimPlot_res01_hashtag_split.pdf"), plot = p3, units = "cm",height = 30,width = 30)
+
+```
+
+
+
+#### 2.2 FeaturePlots, DotPlots, heatmaps
+```{r}
+# need to change the markers to appropriate myeloid subset markers
+
+plts <- lapply(c("Adgre1","Clec9a","Ly6c2","Ccr2","Mertk","Cx3cr1","Nos2","Mki67","S100a8","Flt3","Xcr1","Sirpa","Siglech","Fcer1a","Cd200r3"),function(x){
+  FeaturePlot(myeloid,reduction = "tsne",features = x,label = T) +scale_colour_gradientn(colors = c("grey", "red", "purple"))
+})
+g <- grid.arrange(grobs = plts,nrow = 4)
+ggsave(filename = paste0(outdir,"Myeloid_FeaturePlot_pmarkers.pdf"), plot = g, units = "cm",height = 75,width = 50)
+```
+
+```{r}
+
+p2 <- DotPlot(myeloid,features = c("Adgre1","Clec9a","Ly6c2","Ccr2","Mertk","Cx3cr1","Nos2","Mki67","S100a8","Flt3","Xcr1","Sirpa","Siglech","Fcer1a","Cd200r3"))+RotatedAxis()
+ggsave(filename = paste0(outdir,"Myeloid_FeatureDotPlots.pdf"), plot = p2, units = "cm",height = 20,width = 40)
+```
+
+```{r}
+# define top markers or key markers
+top_markers <- read.csv(paste0(outdir,"markers_myeloid_res05.csv")) %>% filter(p_val_adj < 0.05 ) %>% group_by(cluster) %>% slice_max(order_by = avg_logFC,n = 10)
+# Ident to desirable resolution
+Idents(myeloid) <- myeloid$RNA_snn_res.0.5
+avg.exp <- AverageExpression(myeloid, assays = "RNA",features = top_markers$gene,return.seurat = T)
+g <- DoHeatmap(avg.exp,features = top_markers$gene,draw.lines = F)
+ggsave(filename = paste0(outdir,"Myeloid_heatmap_topmarkers_res05.pdf"), plot = g, units = "cm",height = 40,width = 20)
+```
+
+#### 2.2.2 monocyte/mac
+
+
+```{r}
+mono_mac <- subset(myeloid,subset = annotation_snn_res.0.1 == "monocyte/macrophage")
+```
+
+
+```{r}
+DimPlot(mono_mac,reduction = "tsne",group.by = "RNA_snn_res.0.3",label = T)
+```
+```{r}
+save(mono_mac,file = paste0(outdir,"mono_mac_V2.Robj"))
+```
+
+```{r}
+load(paste0(outdir,"mono_mac_V2.Robj"))
+```
+
+
+checking M1/M2 markers:
+
+
+```{r}
+Idents(mono_mac) <- mono_mac$RNA_snn_res.0.3
+
+VlnPlot(mono_mac,features = c("Cd14","Cd38"))
+VlnPlot(mono_mac,features = c("Nos2","Tnf"))#traditional M1
+VlnPlot(mono_mac,features = c("Arg1","Mrc1")) #traditional M2
+VlnPlot(mono_mac,features = c("Cd274","Tgfb1")) #traditional M2
+VlnPlot(mono_mac,features = c("Gpr18","Fpr2"))#M1 specific
+VlnPlot(mono_mac,features = c("Egr2","Myc"))#M2 specific
+```
+```{r}
+FeaturePlot(mono_mac,features=c("Arg1"),reduction = "tsne",label = T)
+FeaturePlot(mono_mac,features=c("Mrc1"),reduction = "tsne",label = T)
+FeaturePlot(mono_mac,features=c("Cd38"),reduction = "tsne",label = T)
+FeaturePlot(mono_mac,features=c("Gpr18"),reduction = "tsne",label = T)
+FeaturePlot(mono_mac,features=c("Fpr2"),reduction = "tsne",label = T)
+FeaturePlot(mono_mac,features=c("Myc"),reduction = "tsne",label = T)
+FeaturePlot(mono_mac,features=c("Egr2"),reduction = "tsne",label = T)
+```
+
+
+
+```{r}
+
+```
+
+```{r}
+
+markers <- c("Mertk","Nos2","Cx3cr1","Il1r2","Ccr2","Mrc1","Ly6c2","Clec4e","Arg1","Ccl2")
+plts <- apply(markers,function(x){
+  FeaturePlot(myeloid,reduction = "tsne",features = x,label = T,cells = colnames(myeloid)[(myeloid$RNA_snn_res.0.5==0) | (myeloid$RNA_snn_res.0.5==1) | (myeloid$RNA_snn_res.0.5== 2) | (myeloid$RNA_snn_res.0.5==3) | (myeloid$RNA_snn_res.0.5==4) | (myeloid$RNA_snn_res.0.5==6)] ) +scale_colour_gradientn(colors = c("grey", "red", "purple"))
+})
+g <- grid.arrange(grobs = plts,nrow = 3)
+ggsave(filename = paste0(outdir,"Myeloid_FeaturePlot_mono_mac_pmarkers.pdf"), plot = plts, units = "cm",height = 50,width = 40)
+```
+
+##### Try re-process mono-mac
+
+```{r}
+mono_mac <- NormalizeData(mono_mac,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+mono_mac <- FindVariableFeatures(object = mono_mac, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+VariableFeatures(mono_mac) <-  VariableFeatures(mono_mac)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(mono_mac))]
+VariableFeaturePlot(mono_mac)
+
+mono_mac <- ScaleData(object = mono_mac, features = VariableFeatures(object = mono_mac), vars.to.regress = c("nCount_RNA", "percent.mt"))
+mono_mac <- RunPCA(object = mono_mac,
+                features =  VariableFeatures(object = mono_mac),
+                dims = 1:50)
+gc()
+ElbowPlot(mono_mac)
+```
+```{r}
+library(harmony)
+```
+
+```{r}
+mono_mac <- RunHarmony(object = mono_mac, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+mono_mac <- RunUMAP(mono_mac,dims = 1:15,reduction = "harmony")
+mono_mac <- RunTSNE(mono_mac,dims = 1:15,reduction = "harmony")
+
+mono_mac <- FindNeighbors(mono_mac, dims = 1:15,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  mono_mac <- FindClusters(object = mono_mac, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+save(mono_mac,file = paste0(outdir,"mono_mac_V2.Robj"))
+```
+
+```{r}
+Idents(mono_mac) <- mono_mac$RNA_snn_res.0.3
+
+VlnPlot(mono_mac,features = c("Cd14","Cd38","Lyz2","Fcgr3"))
+
+VlnPlot(mono_mac,features = c("Arg1","Chil3"),alpha = 0.1) #traditional M2
+VlnPlot(mono_mac,features = c("Retnla","Mgl2"),alpha = 0.1) #traditional M2
+#VlnPlot(mono_mac,features = c("Ccl17","Ccl18")) #traditional M2
+#VlnPlot(mono_mac,features = c("Egr2","Myc"))
+#VlnPlot(mono_mac,features = c("Cd274","Tgfb1")) #traditional M2
+VlnPlot(mono_mac,features = c("Gpr18","Fpr2"),alpha = 0.1)#M1 specific
+VlnPlot(mono_mac,features = c("Egr2","Myc"),alpha = 0.1)#M2 specific
+
+
+```
+check IFN-TAM
+
+```{r}
+Idents(mono_mac) <- mono_mac$RNA_snn_res.0.3
+VlnPlot(mono_mac,features = c("Nos2","Ifit3","Cd274"),alpha = 0.1)# IFN
+VlnPlot(mono_mac,features = c("Isg15","Ccl2","Il7r"),alpha = 0.1)#IFN
+VlnPlot(mono_mac,features = c("Rsad2","Tnfsf10","Stat1"),alpha = 0.1)# IFN
+```
+```{r}
+VlnPlot(mono_mac,features = c("Ifit1","Ifit2","Ifit3"),alpha = 0.1)# IFN
+VlnPlot(mono_mac,features = c("Ifitm1","Ifitm3","Cxcl9"),alpha = 0.1)# IFN
+```
+Cluster 1 and 4 are IFN-TAM.
+
+Checking inflam-TAM:Cxcl1/2/3/5/8, Ccl20, Ccl3l1, Il1rn, Il1b, G0s2, Inhba, Spp1 
+
+```{r}
+VlnPlot(mono_mac,features = c("Cxcl1","Cxcl2","Cxcl3"),alpha = 0.1)# Inflam
+VlnPlot(mono_mac,features = c("Cxcl5","Cxcl8","Ccl20"),alpha = 0.1)# Inflam
+VlnPlot(mono_mac,features = c("Ccl3l1","Il1rn","Il1b"),alpha = 0.1)# Inflam
+VlnPlot(mono_mac,features = c("G0s2","Inhba","Spp1"),alpha = 0.1)# Inflam
+```
+
+checking LA-TAM: Acp5, Apoc1, Apoe, C1qa/B/C, Ccl18, Ccl8, Cd163, Cd206, Cd36, Cd63, Ctsb/d/l, Cxcl9, Fabp5, Folr2, Gpnmb, Lgals3, Macro, Mrc1, Trem2
+
+```{r}
+VlnPlot(mono_mac,features = c("Acp5","Apoc1","Apoe"),alpha = 0.1)# LA
+VlnPlot(mono_mac,features = c("C1qa","Ccl8","Cd163"),alpha = 0.1)# LA
+VlnPlot(mono_mac,features = c("Cd206","Cd36","Cd63"),alpha = 0.1)# LA
+VlnPlot(mono_mac,features = c("Ctsb","Fabp5","Folr2"),alpha = 0.1)# LA
+VlnPlot(mono_mac,features = c("Gpnmb","Marco","Trem2"),alpha = 0.1)# LA
+VlnPlot(mono_mac,features = c("Lgals3","Mrc1"),alpha = 0.1)# LA
+```
+
+checking angio-TAM: Arg1, Adam8, Bnip3, Mif, Slc2a1 
+
+```{r}
+VlnPlot(mono_mac,features = c("Arg1","Adam8","Bnip3"),alpha = 0.1)# angio_TAM
+VlnPlot(mono_mac,features = c("Mif","Slc2a1"),alpha = 0.1)# Angio
+```
+
+
+```{r}
+VlnPlot(mono_mac,features = c("Ly6c2","Ly6g","Ccr2"),alpha = 0.1)
+VlnPlot(mono_mac,features = c("Mertk","Itga4","Il1r2"),alpha = 0.1)
+```
+double-checking TIM:Ccl2/9, Ccr2, Cd14, Cd300lf, Cxcl10, F13a1, Fcn1, Fn1, Ifi205, Ifit2/3, Il1r2, Isg20, Itga4, Ly6c2, Lyz, Mgst1, Plaur, S100a8/A9/A12, Sell, Tgm2, Thbs1, Tlr2, Vcan
+
+```{r}
+VlnPlot(mono_mac,features = c("Fn1","Isg20","Itga4"),alpha = 0.1)
+VlnPlot(mono_mac,features = c("Sell","Lyz2","Thbs1"),alpha = 0.1)
+```
+```{r}
+VlnPlot(mono_mac,features = c("Cd274","Fas","Pf4"),alpha = 0.1)
+VlnPlot(mono_mac,features = c("Ccl2","Mrc1","Cx3cr1"),alpha = 0.1)
+```
+
+
+```{r message=F}
+FeaturePlot(mono_mac,features=c("Arg1"),reduction = "tsne",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(mono_mac,features=c("Mrc1"),reduction = "tsne",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(mono_mac,features=c("Ccr2"),reduction = "tsne",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(mono_mac,features=c("Gpr18"),reduction = "tsne",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(mono_mac,features=c("Fpr2"),reduction = "tsne",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(mono_mac,features=c("Myc"),reduction = "tsne",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(mono_mac,features=c("Egr2"),reduction = "tsne",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+```
+
+```{r message=F}
+FeaturePlot(mono_mac,features=c("Cd274"),reduction = "tsne",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(mono_mac,features=c("Cd86"),reduction = "tsne",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(mono_mac,features=c("Ccl2"),reduction = "tsne",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(mono_mac,features=c("Mertk"),reduction = "tsne",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(mono_mac,features=c("Cx3cr1"),reduction = "tsne",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(mono_mac,features=c("Chil3"),reduction = "tsne",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(mono_mac,features=c("Cd1d1"),reduction = "tsne",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+```
+
+```{r}
+mono_mac@meta.data <- mono_mac@meta.data %>% 
+  mutate(RNA_snn_res.0.3 = as.character(RNA_snn_res.0.3)) %>%
+  mutate(annotation_snn_res.0.3 = case_match(RNA_snn_res.0.3,
+    "0" ~ "M1-like",
+    "1" ~ "Rsad2+ Mertk- M1-like",
+    "2" ~ "Ccr2- Mrc1+ M2-like",
+    "3" ~ "Arg1+ Mertk- M2-like",
+    "4" ~ "Rsad2+ M1-like",
+    "5" ~ "monocyte-like"
+  )) %>%
+  mutate(polarization = case_match(
+    RNA_snn_res.0.3,
+    "0" ~ "M1-like",
+    "1" ~ "M1-like",
+    "2" ~ "M2-like",
+    "3" ~ "M2-like",
+    "4" ~ "M1-like",
+    "5" ~ "NA"
+  ))
+```
+
+```{r}
+save(mono_mac,file = paste0(outdir,"mono_mac_V2.Robj"))
+```
+
+
+```{r}
+DimPlot(mono_mac,reduction = "tsne",group.by = "annotation_snn_res.0.3")
+DimPlot(mono_mac,reduction = "tsne",group.by = "annotation_snn_res.0.3",split.by = "orig.ident")
+DimPlot(mono_mac,reduction = "tsne",group.by = "annotation_snn_res.0.3",split.by = "hashtag")
+```
+
+
+```{r}
+cluster_prop <- mono_mac@meta.data %>% group_by(orig.ident,annotation_snn_res.0.3) %>%
+  summarise(n = n()) %>% mutate(proportion = 100*n/sum(n))
+cluster_ratio <- cluster_prop %>% group_by(annotation_snn_res.0.3) %>%
+   mutate(ratio = proportion[orig.ident == "ZBTB46"]/proportion[orig.ident == "Control"])
+p1 <- ggplot(cluster_prop,aes(x = orig.ident, y = proportion,fill = orig.ident))+
+  geom_bar(stat = "identity", position = 'dodge')+
+  facet_wrap(~annotation_snn_res.0.3,scales = "free")+guides(fill=guide_legend(title="Condition"))+ ylab("Percentage of mono/mac cells") +
+  theme(
+  plot.title = element_blank(),
+  axis.title.x = element_blank())+RotatedAxis()
+p2 <- ggplot(cluster_ratio,aes(x = reorder(annotation_snn_res.0.3,-log2(ratio)), y = log2(ratio),fill= annotation_snn_res.0.3))+
+  geom_bar(stat = "identity")+ scale_fill_manual(values=mypalette) +theme_grey()+theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ guides(fill=guide_legend(ncol=2,title="Cluster")) + xlab("Clusters") + ylab("log 2 ZBTB46 proportion/Control proportion")
+p3 <- ggplot(M1_M2_ratio,aes(x = orig.ident, y = M1_M2_ratio,fill = orig.ident))+
+  geom_bar(stat = "identity", position = 'dodge')+ guides(fill=guide_legend(title="Condition"))+ ylab("M1/M2 ratio") +
+  theme(
+  plot.title = element_blank(),
+  axis.title.x = element_blank())+RotatedAxis()
+g <- grid.arrange(grobs = list(p1,p2,p3),nrow = 3)
+ggsave(filename = paste0(outdir,"Proportion_barplots_mono_mac_ratio.pdf"), plot = g, units = "cm",height = 50,width = 20)
+```
+```{r}
+M1_M2_ratio <-  mono_mac@meta.data %>% group_by(polarization, orig.ident) %>% filter(polarization != "NA") %>%
+  summarise(n = n()) %>% group_by(orig.ident) %>% mutate(M1_M2_ratio = n[polarization == "M1-like"]/n[polarization == "M2-like"])
+```
+```{r}
+ ggplot(M1_M2_ratio,aes(x = orig.ident, y = M1_M2_ratio,fill = orig.ident))+
+  geom_bar(stat = "identity", position = 'dodge')+ guides(fill=guide_legend(title="Condition"))+ ylab("M1/M2 ratio") +
+  theme(
+  plot.title = element_blank(),
+  axis.title.x = element_blank())+RotatedAxis()
+```
+
+
+
+#### 2.3 Proportion difference
+
+```{r}
+cluster_prop <- myeloid@meta.data %>% group_by(orig.ident,annotation_snn_res.0.1) %>%
+  summarise(n = n()) %>% mutate(proportion = 100*n/sum(n))
+cluster_ratio <- cluster_prop %>% group_by(annotation_snn_res.0.1) %>%
+   mutate(ratio = proportion[orig.ident == "ZBTB46"]/proportion[orig.ident == "Control"])
+p1 <- ggplot(cluster_prop,aes(x = orig.ident, y = proportion,fill = orig.ident))+
+  geom_bar(stat = "identity", position = 'dodge')+
+  facet_wrap(~annotation_snn_res.0.1,scales = "free")+guides(fill=guide_legend(title="Condition"))+ ylab("Percentage of myeloid cells") +
+  theme(
+  plot.title = element_blank(),
+  axis.title.x = element_blank())+RotatedAxis()
+p2 <- ggplot(cluster_ratio,aes(x = reorder(annotation_snn_res.0.1,-log2(ratio)), y = log2(ratio),fill= annotation_snn_res.0.1))+
+  geom_bar(stat = "identity")+ scale_fill_manual(values=mypalette) +theme_grey()+theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ guides(fill=guide_legend(ncol=2,title="Cluster")) + xlab("Clusters") + ylab("log 2 ZBTB46 proportion/Control proportion")
+g <- grid.arrange(grobs = list(p1,p2),nrow = 2)
+ggsave(filename = paste0(outdir,"Proportion_barplots_myeloid.pdf"), plot = g, units = "cm",height = 30,width = 20)
+```
+
+
+#### 2.4 DE across condition per cluster
+
+```{r}
+de_clusters <- function(current_cluster) {
+  groups <- paste0(conditions,"_",current_cluster)
+  both_markers <- FindMarkers(myeloid, ident.1=groups[2], ident.2=groups[1], test.use="MAST", min.pct=0.00, logfc.threshold = 0)
+  marker_genes <- row.names(both_markers)
+  mutate(both_markers, gene = marker_genes, cluster = current_cluster)
+
+}
+```
+
+```{r}
+myeloid$group <- paste0(myeloid$orig.ident,"_",myeloid$RNA_snn_res.0.6)
+conditions <- unique(myeloid$orig.ident)
+clusters <- seq(0,15,1)
+plts <- list()
+padj_thres = 10e-2
+log2FC_thres = 1
+Idents(myeloid) <- myeloid$group
+for (i in clusters) {
+  output_file <- paste0(outdir,paste0('ZBTB46_vs_Control_', i, '.tsv'))
+  output_file_flt <- paste0(outdir,paste0('ZBTB46_vs_Control_', i, '_filtered.tsv'))
+  de_results_tbl <- lapply(i, de_clusters) 
+  de_results_tbl <- de_results_tbl %>% bind_rows() %>%
+			arrange(desc(abs(avg_log2FC))) %>%
+			mutate(threshold = case_when(
+			(p_val_adj < padj_thres) & (abs(avg_log2FC) > log2FC_thres) ~ "Pass",
+			.default = "Fail"
+			))
+  write.table(de_results_tbl, output_file,sep="\t",row.names=T)
+  p <- ggplot(data = de_results_tbl) +
+    geom_point(aes(x = avg_log2FC, y= -log10(p_val_adj),col = threshold))+
+	  geom_vline(xintercept = -1, col="red")+
+	  geom_vline(xintercept = 1, col="red")+
+	  geom_hline(yintercept = 2, col="red")+
+	  scale_color_manual(values = c("#00AFBB","#E7B800"))+
+	  xlab("Average Log2 Fold Change (ZBTB46/Control)")+
+	  ylab("-log10(adjusted P-value)")
+    plts <- append(plts,p)
+	 de_results_tbl <- de_results_tbl %>% 
+			filter(p_val_adj < padj_thres) %>%
+			filter(abs(avg_log2FC) > log2FC_thres)
+			
+  write.table(de_results_tbl, output_file_flt,sep="\t",row.names=T)
+  gc()
+}
+```
+
+#### 2.4.1 Check DE numbers
+
+```{r}
+n_DE_mye <- calculate_n_DE(mye.DE.files,"myeloid")
+```
+
+```{r}
+ggplot(n_DE_mye,aes(x=reorder(cluster, as.integer(cluster)),y=n_pass))+
+  geom_bar(stat = "identity", position = 'dodge')+xlab("cluster number")+ylab("number of DE genes with padj < 0.01")+ggtitle("myeloid clusters at resolution 0.6")+theme_classic()
+g <- ggplot(n_DE_mye,aes(x=reorder(cluster, as.integer(cluster)),y=n_pass))+
+  geom_bar(stat = "identity", position = 'dodge')+xlab("cluster number")+ylab("number of DE genes with padj < 0.01")+ggtitle("myeloid clusters at resolution 0.6")+theme_classic()
+ggsave(filename =  "n_DE_myeloid_res06.pdf",plot = g)
+```
+
+
+#### 2.4.2 perform GSEA and GO on DE between conditions
+
+
+#### 2.5 Pathway analysis
+
+```{r}
+H_df<- msigdbr(species = "Mus musculus", category = "H")
+Imm_df <- msigdbr(species = "Mus musculus", category = "C7")
+
+fgsea_sets_Hallmark <- H_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_Imm <- Imm_df %>% split(x = .$gene_symbol, f = .$gs_name)
+
+# Doublecheck helper function
+plts <- plot_HallmarkGSEA(as.character(seq(0,11)),myeloid,'RNA_snn_res.0.6')
+g <- gridExtra::grid.arrange(grobs = plts,ncol = 3)
+ggsave(filename = paste0(outdir,"Hallmark_GSEA_barplots_myeloid_res06.pdf"),plot = g,height = 60,width = 80,units = "cm")
+```
+
+```{r}
+plotEnrichment(fgsea_sets_Hallmark[["HALLMARK_INTERFERON_GAMMA_RESPONSE"]],
+               ranks) + labs(title="HALLMARK_INTERFERON_GAMMA_RESPONSE")
+```
+
+
+load cluster 2 DE
+```{r}
+DE_df <- read.table(paste0(outdir,"ZBTB46_vs_Control_myeloid2_filtered.tsv"),header = T)
+```
+
+```{r}
+ID <- bitr(DE_df$gene, fromType="SYMBOL", toType=(c("ENTREZID")), OrgDb="org.Mm.eg.db")%>% 
+  filter(!is.na(ENTREZID))
+
+```
+
+```{r}
+GO_out <- groupGO(gene  = ID$ENTREZID,
+               OrgDb    = org.Mm.eg.db,
+               ont      = "BP",
+               level    = 2,
+               readable = TRUE)
+```
+
+```{r}
+head(GO_out)
+```
+
+
+```{r}
+ego <- enrichGO(gene          = DE_df$gene,
+                OrgDb         = org.Mm.eg.db,
+                keyType = "SYMBOL",
+                ont           = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.01,
+                qvalueCutoff  = 0.05,
+        readable      = TRUE)
+head(ego)
+```
+
+```{r}
+goplot(ego)
+```
+
+```{r}
+rm(myeloid)
+```
+
+
+### Part 3 Lymphoid
+
+```{r}
+load(paste0(outdir,lymphoid_file))
+```
+
+#### 3.1 DimPlots: all clusters(with annotation) + split by conditions/hashtag
+```{r}
+p1 <- DimPlot(lymphoid, reduction = "tsne", group.by = annotation,label = T)+ guides(color = guide_legend(override.aes = list(size=4), ncol=2) )
+p2 <- DimPlot(lymphoid, reduction = "tsne", split.by = orig.ident, label = T)+ guides(color = guide_legend(override.aes = list(size=4), ncol=2) )
+p3 <-  DimPlot(lymphoid, group.by=annotation, split.by = hastag,label=T)+ guides(color = guide_legend(override.aes = list(size=4), ncol=2) )
+g <- grid.arrange(grobs = list(p1,p2,p3),nrow = 2)
+ggsave(filename = paste0(outdir,"Lymphoid_DimPlots.pdf"), plot = g, units = "cm",height = 20,width = 40)
+```
+#### 3.2 FeaturePlots, DotPlots, heatmaps
+```{r}
+# need to change the markers to appropriate lymphoid subset markers
+p1 <- FeaturePlot(lymphoid,reduction = "tsne", features = c("Pdcd1","Havcr2","Isg15","Junb","Cebpb","Cx3cr1","Ccl3","Ccl5","Cd69","Gzma","Gzmb","Ncr1","Cd8a","Cd4","Foxp3"))
+p2 <- DotPlot(lymphoid,features = c("Pdcd1","Havcr2","Isg15","Junb","Cebpb","Cx3cr1","Ccl3","Ccl5","Cd69","Gzma","Gzmb","Ncr1","Cd8a","Cd4","Foxp3"))+RotatedAxis()
+g <- grid.arrange(grobs = list(p1,p2),nrow = 2)
+ggsave(filename = paste0(outdir,"Lymphoid_FeatureDotPlots.pdf"), plot = g, units = "cm",height = 20,width = 40)
+```
+
+```{r}
+# define top markers or key markers
+top_markers <- read.csv(paste0(outdir,"top_markers_res06.csv"))
+# Ident to desirable resolution
+Idents(lymphoid) <- lymphoid$RNA_snn_res.0.6
+avg.exp <- AverageExpression(lymphoid, assays = "RNA",features = top_markers$gene,return.seurat = T)
+g <- DoHeatmap(avg.exp,features = top_markers$gene,draw.lines = F)
+ggsave(filename = paste0(outdir,"Lymphoid_heatmap_topmarkers.pdf"), plot = g, units = "cm",height = 30,width = 20)
+```
+
+
+#### 3.3 Proportion difference
+
+```{r}
+cluster_prop <- lymphoid@meta.data %>% group_by(orig.ident,annotation) %>%
+  summarise(n = n()) %>% mutate(proportion = 100*n/sum(n))
+cluster_ratio <- cluster_prop %>% group_by(annotation) %>%
+   mutate(ratio = proportion[orig.ident == "ZBTB46"]/proportion[orig.ident == "Control"])
+p1 <- ggplot(cluster_prop,aes(x = orig.ident, y = proportion,fill = orig.ident))+
+  geom_bar(stat = "identity", position = 'dodge')+
+  facet_wrap(~annotation,scales = "free")+guides(fill=guide_legend(title="Condition"))+ ylab("Percentage of lymphoid cells") +
+  theme(
+  plot.title = element_blank(),
+  axis.title.x = element_blank())+RotatedAxis()
+p2 <- ggplot(cluster_ratio,aes(x = reorder(annotation,-log2(ratio)), y = log2(ratio),fill= annotation))+
+  geom_bar(stat = "identity")+ scale_fill_manual(values=mypalette) +theme_grey()+theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ guides(fill=guide_legend(ncol=2,title="Cluster")) + xlab("Clusters") + ylab("log 2 ZBTB46 proportion/Control proportion")
+g <- grid.arrange(grobs = list(p1,p2),nrow = 2)
+ggsave(filename = paste0(outdir,"Proportion_barplots_lymphoid.pdf"), plot = g, units = "cm",height = 30,width = 20)
+```
+
+
+#### 3.4 DE across condition per cluster
+
+```{r}
+de_clusters <- function(current_cluster) {
+  groups <- paste0(conditions,"_",current_cluster)
+  both_markers <- FindMarkers(lymphoid, ident.1=groups[2], ident.2=groups[1], test.use="MAST", min.pct=0.00, logfc.threshold = 0)
+  marker_genes <- row.names(both_markers)
+  mutate(both_markers, gene = marker_genes, cluster = current_cluster)
+
+}
+```
+
+```{r}
+lymphoid$group <- paste0(lymphoid$orig.ident,"_",lymphoid$RNA_snn_res.0.6)
+conditions <- unique(lymphoid$orig.ident)
+clusters <- seq(0,15,1)
+plts <- list()
+padj_thres = 10e-2
+log2FC_thres = 1
+Idents(lymphoid) <- lymphoid$group
+for (i in clusters) {
+  output_file <- paste0(outdir,paste0('ZBTB46_vs_Control_', i, '.tsv'))
+  output_file_flt <- paste0(outdir,paste0('ZBTB46_vs_Control_', i, '_filtered.tsv'))
+  de_results_tbl <- lapply(i, de_clusters) 
+  de_results_tbl <- de_results_tbl %>% bind_rows() %>%
+			arrange(desc(abs(avg_log2FC))) %>%
+			mutate(threshold = case_when(
+			(p_val_adj < padj_thres) & (abs(avg_log2FC) > log2FC_thres) ~ "Pass",
+			.default = "Fail"
+			))
+  write.table(de_results_tbl, output_file,sep="\t",row.names=T)
+  p <- ggplot(data = de_results_tbl) +
+    geom_point(aes(x = avg_log2FC, y= -log10(p_val_adj),col = threshold))+
+	  geom_vline(xintercept = -1, col="red")+
+	  geom_vline(xintercept = 1, col="red")+
+	  geom_hline(yintercept = 2, col="red")+
+	  scale_color_manual(values = c("#00AFBB","#E7B800"))+
+	  xlab("Average Log2 Fold Change (ZBTB46/Control)")+
+	  ylab("-log10(adjusted P-value)")
+    plts <- append(plts,p)
+	 de_results_tbl <- de_results_tbl %>% 
+			filter(p_val_adj < padj_thres) %>%
+			filter(abs(avg_log2FC) > log2FC_thres)
+			
+  write.table(de_results_tbl, output_file_flt,sep="\t",row.names=T)
+  gc()
+}
+```
+
+#### 3.5 Pathway analysis
+
+
+```{r}
+H_df<- msigdbr(species = "Mus musculus", category = "H")
+Imm_df <- msigdbr(species = "Mus musculus", category = "C7")
+
+fgsea_sets_Hallmark <- H_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_Imm <- Imm_df %>% split(x = .$gene_symbol, f = .$gs_name)
+
+# Doublecheck helper function
+
+```
+
+```{r}
+plts <- plot_HallmarkGSEA(as.character(seq(0,11)),lymphoid,'RNA_snn_res.0.6')
+g <- gridExtra::grid.arrange(grobs = plts,ncol = 3)
+ggsave(filename = paste0(outdir,"Hallmark_GSEA_barplots_lymphoid_res06.pdf"),plot = g,height = 60,width = 80,units = "cm")
+```
+
+
+```{r}
+plotEnrichment(fgsea_sets_Hallmark[["HALLMARK_INTERFERON_GAMMA_RESPONSE"]],
+               ranks) + labs(title="HALLMARK_INTERFERON_GAMMA_RESPONSE")
+```
+
+
+load cluster 2 DE; load appropriate DE for actual GO analysis
+```{r}
+DE_df <- read.table(paste0(outdir,"ZBTB46_vs_Control_lymphoid_2_filtered.tsv"),header = T)
+```
+
+```{r}
+ID <- bitr(DE_df$gene, fromType="SYMBOL", toType=(c("ENTREZID")), OrgDb="org.Mm.eg.db")%>% 
+  filter(!is.na(ENTREZID))
+
+```
+
+```{r}
+GO_out <- groupGO(gene  = ID$ENTREZID,
+               OrgDb    = org.Mm.eg.db,
+               ont      = "BP",
+               level    = 2,
+               readable = TRUE)
+```
+
+```{r}
+head(GO_out)
+```
+
+
+```{r}
+ego <- enrichGO(gene          = DE_df$gene,
+                OrgDb         = org.Mm.eg.db,
+                keyType = "SYMBOL",
+                ont           = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.01,
+                qvalueCutoff  = 0.05,
+        readable      = TRUE)
+head(ego)
+```
+
+```{r}
+goplot(ego)
+```
+
+
+```{r}
+rm(lymphoid)
+```
+
+### Part 4 stromal
+
+
+```{r}
+load(paste0(outdir,stromal_file))
+```
+
+```{r}
+Idents(stromal) <- stromal$RNA_snn_res.0.2
+```
+
+```{r}
+g <- VlnPlot(stromal,features = c("Fap","Col5a2","Il6","Has1","Clec3b","Spp1","Arhgdib","Tpm2","Myct1","Pecam1","H2-Ab1","Cd74","Acta2"),group.by = "RNA_snn_res.0.1")
+ggsave(filename = "stromal_res01_marker_VlnPlot.pdf", plot = g)
+```
+
+```{r}
+stromal@meta.data <- stromal@meta.data %>% 
+  mutate(RNA_snn_res.0.1 = as.character(RNA_snn_res.0.1)) %>%
+  mutate(annotation_snn_res.0.1 = case_match(RNA_snn_res.0.1,
+    "0" ~ "iCAF",
+    "1" ~ "apCAF",
+    "2" ~ "EC",
+    "3" ~ "myCAF"
+  ))
+```
+
+```{r}
+stromal@meta.data <- stromal@meta.data %>% 
+  mutate(RNA_snn_res.0.2 = as.character(RNA_snn_res.0.2)) %>%
+  mutate(annotation_snn_res.0.2 = case_match(RNA_snn_res.0.2,
+    "0" ~ "iCAF_1",
+    "1" ~ "iCAF_2",
+    "2" ~ "iCAF_3",
+    "3" ~ "apCAF",
+    "4" ~ "EC",
+    "5" ~ "myCAF"
+  ))
+```
+
+```{r}
+save(stromal,file = paste0(outdir,stromal_file))
+```
+
+
+#### 4.1 DimPlots: all clusters(with annotation) + split by conditions/hashtag
+```{r}
+p1 <- DimPlot(stromal, reduction = "tsne", group.by = "annotation_snn_res.0.2",label = T)
+p2 <- DimPlot(stromal, reduction = "tsne", split.by = "orig.ident",group.by =  "annotation_snn_res.0.2")
+p3 <-  DimPlot(stromal, reduction = "tsne",group.by="annotation_snn_res.0.2", split.by = "hashtag")
+g <- grid.arrange(grobs = list(p1,p2,p3),nrow = 2)
+ggsave(filename = paste0(outdir,"Stromal_DimPlots_res02.pdf"), plot = g, units = "cm",height = 20,width = 40)
+```
+
+pick reporter positive subsets, split by orig.iden?  
+
+#### 4.2 FeaturePlots, DotPlots, heatmaps
+
+```{r}
+# need to change the markers to appropriate myeloid subset markers
+
+plts <- lapply(c("S100a4","Sparcl1","Vim","Sparcl1","Myh11","Mcam","Col5a2", "Aebp1", "Col1a1", "Col1a2", "Col3a1","Fap", "Comp", "Mmp13", "Sfrp2","Rgs5","Igfbp7","A2m", "Cpe", "Adamts1", "Acta2","Fabp7", "Vegfa", "Spp1", "Igkc", "Iglc2", "Hilpda", "Ighg1", "Ighg3","S100a9", "S100a8", "Fcgr3", "G0s2","Nampt", "Rgs2", "Sod2"),function(x){
+  FeaturePlot(stromal,reduction = "tsne",features = x,label = T) +scale_colour_gradientn(colors = c("grey", "red", "purple"))
+})
+g <- grid.arrange(grobs = plts,nrow = 6)
+ggsave(filename = paste0(outdir,"Stromal_FeaturePlot_pmarkers.pdf"), plot = g, units = "cm",height = 100,width = 100)
+```
+```{r}
+FeaturePlot(stromal,features = c("Cebpb"),split.by = "hashtag")
+FeaturePlot(stromal,features = c("Zbtb46"),split.by = "hashtag")
+```
+
+
+```{r}
+# need to change the markers to appropriate lymphoid subset markers
+
+p2 <- DotPlot(stromal,features = c("S100a4","Sparcl1","Vim","Sparcl1","Myh11","Mcam","Col5a2", "Aebp1", "Col1a1", "Col1a2", "Col3a1","Fap", "Comp", "Mmp13", "Sfrp2","Rgs5","Igfbp7","A2m", "Cpe", "Adamts1", "Acta2","Fabp7", "Vegfa", "Spp1", "Igkc", "Iglc2", "Hilpda", "Ighg1", "Ighg3","S100a9", "S100a8", "Fcgr3", "G0s2","Nampt", "Rgs2", "Sod2"))+RotatedAxis()
+
+ggsave(filename = paste0(outdir,"Stromal_FeatureDotPlots.pdf"), plot = p2, units = "cm",height = 20,width = 40)
+```
+
+```{r}
+# define top markers or key markers
+top_markers <- read.csv(paste0(outdir,"markers_stromal_res01.csv")) %>% filter(p_val_adj < 0.05 ) %>% group_by(cluster) %>% slice_max(order_by = avg_logFC,n = 20)
+
+# Ident to desirable resolution
+Idents(stromal) <- stromal$RNA_snn_res.0.1
+avg.exp <- AverageExpression(stromal, assays = "RNA",features = top_markers$gene,return.seurat = T)
+g <- DoHeatmap(avg.exp,features = top_markers$gene,draw.lines = F)
+ggsave(filename = paste0(outdir,"Stromal_heatmap_topmarkers_res01.pdf"), plot = g, units = "cm",height = 30,width = 20)
+```
+
+
+#### 4.3 Proportion difference
+
+```{r}
+cluster_prop <- stromal@meta.data %>% group_by(orig.ident,annotation_snn_res.0.2) %>%
+  summarise(n = n()) %>% mutate(proportion = 100*n/sum(n))
+cluster_ratio <- cluster_prop %>% group_by(annotation_snn_res.0.2) %>%
+   mutate(ratio = proportion[orig.ident == "ZBTB46"]/proportion[orig.ident == "Control"])
+p1 <- ggplot(cluster_prop,aes(x = orig.ident, y = proportion,fill = orig.ident))+
+  geom_bar(stat = "identity", position = 'dodge')+
+  facet_wrap(~annotation_snn_res.0.2,scales = "free")+guides(fill=guide_legend(title="Condition"))+ ylab("Percentage of stromal cells") +
+  theme(
+  plot.title = element_blank(),
+  axis.title.x = element_blank())+RotatedAxis()
+p2 <- ggplot(cluster_ratio,aes(x = reorder(annotation_snn_res.0.2,-log2(ratio)), y = log2(ratio),fill= annotation_snn_res.0.2))+
+  geom_bar(stat = "identity")+ scale_fill_manual(values=mypalette) +theme_grey()+theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ guides(fill=guide_legend(ncol=2,title="Cluster")) + xlab("Clusters") + ylab("log 2 ZBTB46 proportion/Control proportion")
+g <- grid.arrange(grobs = list(p1,p2),nrow = 2)
+ggsave(filename = paste0(outdir,"Proportion_barplots_stromal_res02.pdf"), plot = g, units = "cm",height = 30,width = 20)
+```
+
+
+#### 4.4 DE across condition per cluster
+
+```{r}
+de_clusters <- function(current_cluster) {
+  groups <- paste0(conditions,"_",current_cluster)
+  both_markers <- FindMarkers(stromal, ident.1=groups[2], ident.2=groups[1], test.use="MAST", min.pct=0.00, logfc.threshold = 0)
+  marker_genes <- row.names(both_markers)
+  mutate(both_markers, gene = marker_genes, cluster = current_cluster)
+
+}
+```
+
+```{r}
+stromal$group <- paste0(stromal$orig.ident,"_",stromal$RNA_snn_res.0.6)
+conditions <- unique(stromal$orig.ident)
+clusters <- seq(0,15,1)
+plts <- list()
+padj_thres = 10e-2
+log2FC_thres = 1
+Idents(stromal) <- stromal$group
+for (i in clusters) {
+  output_file <- paste0(outdir,paste0('ZBTB46_vs_Control_', i, '.tsv'))
+  output_file_flt <- paste0(outdir,paste0('ZBTB46_vs_Control_', i, '_filtered.tsv'))
+  de_results_tbl <- lapply(i, de_clusters) 
+  de_results_tbl <- de_results_tbl %>% bind_rows() %>%
+			arrange(desc(abs(avg_log2FC))) %>%
+			mutate(threshold = case_when(
+			(p_val_adj < padj_thres) & (abs(avg_log2FC) > log2FC_thres) ~ "Pass",
+			.default = "Fail"
+			))
+  write.table(de_results_tbl, output_file,sep="\t",row.names=T)
+  p <- ggplot(data = de_results_tbl) +
+    geom_point(aes(x = avg_log2FC, y= -log10(p_val_adj),col = threshold))+
+	  geom_vline(xintercept = -1, col="red")+
+	  geom_vline(xintercept = 1, col="red")+
+	  geom_hline(yintercept = 2, col="red")+
+	  scale_color_manual(values = c("#00AFBB","#E7B800"))+
+	  xlab("Average Log2 Fold Change (ZBTB46/Control)")+
+	  ylab("-log10(adjusted P-value)")
+    plts <- append(plts,p)
+	 de_results_tbl <- de_results_tbl %>% 
+			filter(p_val_adj < padj_thres) %>%
+			filter(abs(avg_log2FC) > log2FC_thres)
+			
+  write.table(de_results_tbl, output_file_flt,sep="\t",row.names=T)
+  gc()
+}
+```
+
+#### 4.5 Pathway analysis
+
+```{r}
+H_df<- msigdbr(species = "Mus musculus", category = "H")
+Onto_df <- msigdbr(species = "Mus musculus", category = "C5")
+
+fgsea_sets_Hallmark <- H_df %>% split(x = .$gene_symbol, f = .$gs_name)
+
+```
+
+
+
+
+```{r}
+# Doublecheck helper function
+plts <- plot_HallmarkGSEA(as.character(seq(0,3)),stromal,'RNA_snn_res.0.1')
+g <- gridExtra::grid.arrange(grobs = plts,ncol = 3)
+ggsave(filename = paste0(outdir,"Hallmark_GSEA_barplots_stromal_res01.pdf"),plot = g,height = 60,width = 80,units = "cm")
+```
+
+
+```{r}
+plotEnrichment(fgsea_sets_Hallmark[["HALLMARK_INTERFERON_GAMMA_RESPONSE"]],
+               ranks) + labs(title="HALLMARK_INTERFERON_GAMMA_RESPONSE")
+```
+
+
+
+
+```{r}
+n_DE_str <- calculate_n_DE(str.DE.files,"stromal")
+```
+
+```{r}
+ggplot(n_DE_str,aes(x=reorder(cluster, as.integer(cluster)),y=n_pass))+
+  geom_bar(stat = "identity", position = 'dodge')+xlab("cluster number")+ylab("number of DE genes with padj < 0.01")+ggtitle("stromal clusters at resolution 0.1")+theme_classic()
+g <- ggplot(n_DE_str,aes(x=reorder(cluster, as.integer(cluster)),y=n_pass))+
+  geom_bar(stat = "identity", position = 'dodge')+xlab("cluster number")+ylab("number of DE genes with padj < 0.01")+ggtitle("stromal clusters at resolution 0.1")+theme_classic()
+ggsave(filename =  "n_DE_stromal_res02.pdf",plot = g)
+```
+
+
+load cluster 2 DE; load appropriate DE for actual GO analysis
+```{r}
+DE_df <- read.table(paste0(outdir,"ZBTB46_vs_Control_stromal_0.tsv"),header = T)
+```
+
+```{r}
+EnhancedVolcano(DE_df,
+    lab = rownames(DE_df),
+    x = 'avg_log2FC',
+    y = 'p_val_adj',
+    pCutoff = 1e-2,
+    ylab = "adjusted P-value")
+g <- EnhancedVolcano(DE_df,
+    lab = rownames(DE_df),
+    x = 'avg_log2FC',
+    y = 'p_val_adj',
+    pCutoff = 1e-2,
+    ylab = "adjusted P-value",
+    title = "Treatment v.s. Control")
+
+ggsave(filename =  "Stromal_volcano_res02_c0.pdf",plot = g, units = "cm",height = 20,width = 15)
+```
+
+
+
+```{r}
+DE_df <- read.table(paste0(outdir,"ZBTB46_vs_Control_stromal_3_filtered.tsv"),header = T)
+```
+
+
+```{r}
+up_reg_df = DE_df %>% filter(avg_log2FC > 0)
+```
+
+```{r}
+ID <- bitr(down_reg_df$gene, fromType="SYMBOL", toType=(c("ENTREZID")), OrgDb="org.Mm.eg.db")%>% 
+  filter(!is.na(ENTREZID))
+
+```
+
+```{r}
+GO_out <- groupGO(gene  = ID$ENTREZID,
+               OrgDb    = org.Mm.eg.db,
+               ont      = "BP",
+               level    = 2,
+               readable = TRUE)
+```
+
+```{r}
+head(GO_out)
+```
+
+
+```{r}
+ego <- enrichGO(gene          = up_reg_df$gene,
+                OrgDb         = org.Mm.eg.db,
+                keyType = "SYMBOL",
+                ont           = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.01,
+                qvalueCutoff  = 0.05,
+        readable      = TRUE)
+head(ego)
+```
+
+```{r}
+ego_res <- ego@result %>% filter(p.adjust < 0.01 & qvalue < 0.05) %>% slice_max(order_by = BgRatio,n=50)
+```
+
+```{r}
+write.table(ego_res,file = "stromal_res02_c3_ego_BP_up.tsv",sep = "\t",col.names = T,row.names = F)
+```
+
+```{r}
+fgsea_sets_Onto <- Onto_df %>% filter(gs_exact_source %in% ego_res$ID) %>% split(x = .$gene_symbol, f = .$gs_name) 
+```
+
+```{r}
+DE_df <- read.table(paste0(outdir,"ZBTB46_vs_Control_stromal_3.tsv"),header = T)
+cluster_DE_genes<- DE_df %>%
+    filter(p_val_adj < 0.01) %>%
+    arrange(desc(avg_log2FC)) %>%
+    dplyr::select(gene, avg_log2FC)
+    ranks<- deframe(cluster_DE_genes)
+    fgseaRes <- fgseaSimple(fgsea_sets_Onto, stats = ranks,nperm = 5000)
+    fgseaResTidy <- fgseaRes %>%
+      as_tibble() %>%
+      arrange(desc(NES))
+ggplot(fgseaResTidy %>% filter(padj < 0.05) %>% head(n= 20), aes(reorder(pathway, NES), NES)) +
+    geom_col(aes(fill= NES < 7.5)) +
+    coord_flip() +
+    labs(x="Ontology", y="Normalized Enrichment Score",
+       title=paste0("cluster ","0")) +
+    theme_minimal()
+
+#ggsave(filename = paste0(outdir,"Onto_GSEA_barplots_stromal_res01_c0.pdf"),plot = plts,height = 60,width = 80,units = "cm")
+```
+
+```{r}
+cluster_DE_genes<- DE_df %>%
+    filter(p_val_adj < 0.01) %>%
+    arrange(desc(avg_log2FC)) %>%
+    dplyr::select(gene, avg_log2FC)
+    ranks<- deframe(cluster_DE_genes)
+    fgseaRes <- fgseaSimple(fgsea_sets_Hallmark, stats = ranks,nperm = 3000)
+    fgseaResTidy <- fgseaRes %>%
+      as_tibble() %>%
+      arrange(desc(NES))
+ggplot(fgseaResTidy %>% filter(padj < 0.05) %>% head(n= 20), aes(reorder(pathway, NES), NES)) +
+    geom_col(aes(fill= NES < 7.5)) +
+    coord_flip() +
+    labs(x="Hallmark", y="Normalized Enrichment Score",
+       title=paste0("cluster ","0")) +
+    theme_minimal()
+```
+
+```{r}
+p0 <- ggplot(fgseaResTidy %>% filter(padj < 0.05) %>% head(n= 20), aes(reorder(pathway, NES), NES)) +
+    geom_col(aes(fill= NES < 7.5)) +
+    coord_flip() +
+    labs(x="Hallmark", y="Normalized Enrichment Score",
+       title=paste0("cluster ","0")) +
+    theme_minimal()
+p1 <- plotEnrichment(fgsea_sets_Hallmark[["HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION"]],ranks) + labs(title="HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION")
+p2 <- plotEnrichment(fgsea_sets_Hallmark[["HALLMARK_OXIDATIVE_PHOSPHORYLATION"]],ranks) + labs(title="HALLMARK_OXIDATIVE_PHOSPHORYLATION")
+p3 <- plotEnrichment(fgsea_sets_Hallmark[["HALLMARK_TNFA_SIGNALING_VIA_NFKB"]],ranks) + labs(title="HALLMARK_TNFA_SIGNALING_VIA_NFKB")
+p4 <- plotEnrichment(fgsea_sets_Hallmark[["HALLMARK_MYC_TARGETS_V1"]],ranks) + labs(title="HALLMARK_MYC_TARGETS_V1")
+g <- gridExtra::grid.arrange(grobs = list(p0,p1,p2,p3,p4),ncol = 2)
+ggsave(filename = "stromal_res01_c0_ZvC_DE_Hallmarks.pdf",plot = g,units = "cm",width = 40,height = 50)
+
+```
+
+
+```{r}
+g <- goplot(ego,max.overlap = 20)
+ggsave(filename = "GoPlot_stromal_res01_c0.pdf",units = "cm",height = 50,width = 50)
+```
+
+```{r}
+save(ego,file = "stromal_res01_c0_ego.Robj")
+```
+
+```{r}
+range(ego@result[["p.adjust"]])
+range(ego@result[["qvalue"]])
+```
+
+```{r}
+rm(stromal)
+```
+
+

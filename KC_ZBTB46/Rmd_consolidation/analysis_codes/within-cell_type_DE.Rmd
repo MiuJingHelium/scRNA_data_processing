@@ -1,0 +1,331 @@
+---
+title: "Within-cell type DE"
+output: html_document
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(data.table)
+library(MAST)
+```
+
+```{r}
+indir = "./R_outs/"
+outdir = "./R_outs/"
+```
+
+```{r}
+load(paste0(outdir,"whole_V2p4.Robj"))
+```
+
+```{r}
+table(whole$celltype)
+```
+
+```{r}
+table(whole$hashtag)
+table(paste(whole$orig.ident,whole$hashtag,sep = "_"))
+length(paste(whole$orig.ident,whole$hashtag,sep = "_"))
+```
+
+```{r}
+whole$condition <- paste(whole$orig.ident,whole$hashtag,sep = "_")
+```
+
+```{r}
+whole@meta.data <- whole@meta.data %>%
+  mutate(annotation_V2 = case_match(annotation,
+    "Mono/mac_1: M1-like 1" ~ "Mono/Mac_1",
+    "Mono/mac_2: Mertk- Ccr2+ M1-like" ~ "Mono/Mac_1",
+    "Mono/mac_3: Mertk+ Ccr2- Arg- M2-like" ~ "Mono/Mac_2",
+    "Mono/Mac_4: Arg1+ Ifitm1+" ~ "Mono/Mac_3",
+    "Mono/Mac_5: Mertk+ Ccr2- Arg1+ M2-like" ~ "Mono/Mac_4",
+    "Mono/Mac_6: Rsad2 high M1-like" ~ "Mono/Mac_5",
+    "Mono/Mac_7: M1-like 2" ~ "Mono/Mac_1",
+    "Mono/Mac_8: Mertk - Ccr2+ Mrc1- Il1r2- M2-like" ~ "Mono/Mac_1",
+    "Mono/Mac_9: Mertk+ Ccr2+ M2-like" ~ "Mono/Mac_1",
+    .default = annotation))
+```
+
+```{r}
+table(whole@meta.data$annotation_V2)
+```
+
+
+```{r}
+save(whole, file=paste0(outdir,"whole_V2p4.Robj"))
+```
+
+### perform DE among CAF
+
+```{r}
+CAF <- subset(whole,subset = celltype == "CAF")
+```
+
+```{r}
+table(CAF$annotation)
+```
+
+
+```{r}
+Idents(CAF) <- CAF$annotation
+
+CAF_markers <- FindAllMarkers(CAF)
+
+
+```
+
+```{r}
+write.table(CAF_markers,
+              paste0("R_outs/","CAF_annotation_markers.tsv"),
+              sep="\t",
+              quote=F,
+              row.names=F)
+```
+
+
+### DE among DC
+
+```{r}
+DC <- subset(whole,subset = celltype == "DC")
+table(DC$annotation)
+```
+
+```{r}
+Idents(DC) <- DC$annotation
+
+markers <- FindAllMarkers(DC)
+
+write.table(markers,
+              paste0("R_outs/","DC_annotation_markers.tsv"),
+              sep="\t",
+              quote=F,
+              row.names=F)
+```
+
+### DE Neutrophils
+
+```{r}
+Neutrophil <- subset(whole,subset = celltype == "Neutrophil")
+table(Neutrophil$annotation)
+```
+
+```{r}
+Idents(Neutrophil) <- Neutrophil$annotation
+
+markers <- FindAllMarkers(Neutrophil)
+
+write.table(markers,
+              paste0("R_outs/","Neutrophil_annotation_markers.tsv"),
+              sep="\t",
+              quote=F,
+              row.names=F)
+```
+
+### DE among mono/mac
+
+```{r}
+mono_mac <- subset(whole,subset = celltype == "Mono/Mac")
+
+```
+
+```{r}
+table(mono_mac$annotation_V2)
+```
+
+
+```{r}
+Idents(mono_mac) <- mono_mac$annotation_V2
+
+markers <- FindAllMarkers(mono_mac)
+
+write.table(markers,
+              paste0("R_outs/","mono_mac_annotation_markers_V2.tsv"),
+              sep="\t",
+              quote=F,
+              row.names=F)
+```
+
+```{r}
+test <- read.table(file = paste0("R_outs/","mono_mac_annotation_markers.tsv"),header = T,sep = "\t")
+```
+
+### functional analysis of DE results
+
+```{r}
+library(presto)
+library(msigdbr)
+library(fgsea)
+library(ReactomeGSA)
+library(gridExtra)
+```
+
+#### mono/mac
+
+```{r}
+DE_table <- read.table(file = paste0("R_outs/","mono_mac_annotation_markers_V2.tsv"),header = T,sep = "\t")
+```
+
+
+```{r}
+plot_HallmarkGSEA <- function(cluster_list,celltype,DE_table,padj = 0.01,log2FC = 1){
+  # here the cluster list is the list of annotation to go over
+  n <- length(cluster_list)
+  plts <- list(n)
+  fgsea_table <- data.frame()
+  DE <- DE_table %>% filter(p_val_adj < padj & avg_log2FC >= log2FC)
+  for (i in seq(1:n)){
+    cluster_DE_genes<- DE %>%
+    dplyr::filter(cluster == cluster_list[i]) %>%
+    arrange(desc(avg_log2FC)) %>%
+    dplyr::select(gene,avg_log2FC)
+    ranks<- deframe(cluster_DE_genes)
+    fgseaRes <- fgseaMultilevel(fgsea_sets_Hallmark, stats = ranks,scoreType = "pos",eps = 0)
+    fgseaResTidy <- fgseaRes %>%
+      as_tibble() %>%
+      arrange(desc(NES))
+    ggplot(fgseaResTidy %>% filter(padj < 0.01) %>% head(n= 25), aes(reorder(pathway, NES), NES)) +
+    geom_col(aes(fill= NES < 7.5)) +
+    coord_flip() +
+    labs(x="Hallmark Pathway", y="Normalized Enrichment Score",
+       title=paste0("",cluster_list[i])) +
+    theme_minimal()
+    plts[[i]] <- ggplot(fgseaResTidy %>% filter(padj < 0.01) %>% head(n= 25), aes(reorder(pathway, NES), NES)) +
+    geom_col(aes(fill= NES < 7.5)) +
+    coord_flip() +
+    labs(x="Hallmark Pathway", y="Normalized Enrichment Score",
+       title=paste0("",cluster_list[i])) +
+    theme_minimal()
+    fgsea_table_tmp <- cbind(fgseaResTidy,cluster = rep(cluster_list[i],nrow(fgseaResTidy)))
+    fgsea_table <- rbind(fgsea_table,fgsea_table_tmp)
+  }
+  result <- list(plts = plts,table = fgsea_table)
+  return(result)
+}
+```
+
+```{r}
+cbind(fgseaResTidy,cluster = rep(cluster_list[1],nrow(fgseaResTidy)))
+```
+
+```{r}
+H_df<- msigdbr(species = "Mus musculus", category = "H")
+Imm_df <- msigdbr(species = "Mus musculus", category = "C7")
+
+fgsea_sets_Hallmark <- H_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_Imm <- Imm_df %>% split(x = .$gene_symbol, f = .$gs_name)
+```
+
+
+```{r}
+# Doublecheck helper function
+res <- plot_HallmarkGSEA(unique(DE_table$cluster),"mono_mac",DE_table,log2FC = 1.25)
+g <- gridExtra::grid.arrange(grobs = res$plts,ncol = 3)
+ggsave(filename = paste0(outdir,"Hallmark_GSEA_barplots_mono_mac.pdf"),plot = g,height = 60,width = 80,units = "cm")
+```
+
+```{r}
+fgsea_table <- as.data.frame(res$table)
+```
+
+
+```{r}
+write.table(fgsea_table,
+              paste0("./R_outs/","mono_mac_annotation_fgsea.tsv"),
+              sep="\t",
+              quote=F,
+              row.names=F)
+```
+
+
+```{r}
+plotEnrichment(fgsea_sets_Hallmark[["HALLMARK_INTERFERON_GAMMA_RESPONSE"]],
+               ranks) + labs(title="HALLMARK_INTERFERON_GAMMA_RESPONSE")
+```
+
+
+
+
+## Direct and indirect effect DE
+
+```{r}
+table(whole$condition)
+```
+
+We need to first define a function for DE to be repeated over different condition combination while looping over annotation. We also need to generate a table for each annotation with information on number of cells from each condition.
+
+Note that most cells from lymphoid are reporter -,it is thus meaningless to perform this DE over lymphoid cells.
+
+```{r}
+sp <- subset(whole,subset = (hashtag == "Reporter+") | (hashtag == "Reporter-"))
+```
+
+```{r}
+table(sp$condition)
+```
+
+```{r}
+save(sp, file=paste0(outdir,"whole_V2p4_annotated_SP.Robj"))
+```
+
+
+```{r}
+sp_condition_table <- sp@meta.data %>% group_by(condition,annotation) %>%  
+  summarise(n = n()) %>% mutate(total_by_condition = sum(n)) %>% mutate(percentage = n*100/total_by_condition) %>% ungroup() %>% mutate(total = sum(n))
+```
+
+```{r}
+g <- ggplot(sp_condition_table,aes(x = condition, y = percentage,fill = condition))+
+  geom_bar(stat = "identity", position = 'dodge')+
+  facet_wrap(~annotation,scales = "free")+guides(fill=guide_legend(title="Condition"))+ ylab("Percentage of cells with same condition")+
+  theme(
+  plot.title = element_blank(),
+  axis.title.x = element_blank())+RotatedAxis()
+ggsave(filename = paste0(outdir,"Proportion_barplots_condition_by_annotation.pdf"), plot = g, units = "cm",height = 30,width = 50)
+```
+
+```{r}
+g <- ggplot(sp_condition_table,aes(x = condition, y = n,fill = condition))+
+  geom_bar(stat = "identity", position = 'dodge')+
+  facet_wrap(~annotation,scales = "free")+guides(fill=guide_legend(title="Condition"))+ ylab("Percentage of cells with same condition")+
+  theme(
+  plot.title = element_blank(),
+  axis.title.x = element_blank())+RotatedAxis()
+ggsave(filename = paste0(outdir,"number_barplots_condition_by_annotation.pdf"), plot = g, units = "cm",height = 30,width = 50)
+```
+
+```{r}
+sp_condition_table <- sp@meta.data %>% group_by(annotation,condition) %>%  
+  summarise(n = n()) %>% mutate(total_by_annotation = sum(n))  %>% mutate(percentage = n*100/total_by_annotation) %>% ungroup() %>% mutate(total = sum(n))
+```
+
+
+```{r}
+write.table(sp_condition_table,file = paste0(outdir,"SP_annotation_table_by_condition.tsv"),sep = "\t",quote = F,row.names = F)
+```
+
+```{r}
+g <- ggplot(sp_condition_table,aes(x = condition, y = percentage,fill = condition))+
+  geom_bar(stat = "identity", position = 'dodge')+
+  facet_wrap(~annotation,scales = "free")+guides(fill=guide_legend(title="Condition"))+ ylab("Percentage of cells with the same annotation")+
+  theme(
+  plot.title = element_blank(),
+  axis.title.x = element_blank())+RotatedAxis()
+ggsave(filename = paste0(outdir,"Proportion_barplots_annotation_by_condition.pdf"), plot = g, units = "cm",height = 30,width = 50)
+```
+
+
+
+
+
+```{r}
+de_clusters <- function(current_cluster) {
+  groups <- paste0(conditions,"_",current_cluster)
+  both_markers <- FindMarkers(lymphoid, ident.1=groups[2], ident.2=groups[1], test.use="MAST", min.pct=0.00, logfc.threshold = 0)
+  marker_genes <- row.names(both_markers)
+  mutate(both_markers, gene = marker_genes, cluster = current_cluster)
+  
+}
+```
+

@@ -1,0 +1,597 @@
+---
+title: "export cell and cluster tables"
+output: html_document
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(data.table)
+library(harmony)
+```
+
+This R markdown is used for exporting metatable and plot creation tables.
+
+### start from compartments
+
+```{r}
+indir = "./R_outs/"
+outdir = "./R_outs/"
+whole_dataset_file = "whole_V2p3.Robj" # we may export metadata from merged and create a new whole dataset to prevent any conflict due to change in cluster resolution
+myeloid_file = "myeloid_V2p4.Robj"
+lymphoid_file = "lymphoid_V2p4.Robj"
+stromal_file = "stromal_V2p4.Robj"
+```
+
+
+
+```{r}
+load(paste0(outdir,stromal_file))
+```
+
+```{r}
+table(stromal$RNA_snn_res.0.1)
+```
+
+```{r}
+stromal@meta.data <- stromal@meta.data %>% 
+  mutate(RNA_snn_res.0.1 = as.character(RNA_snn_res.0.1)) %>%
+  mutate(annotation = case_match(RNA_snn_res.0.1,
+    "0" ~ "iCAF",
+    "1" ~ "apCAF",
+    "2" ~ "EC",
+    "3" ~ "myCAF"
+  ))
+```
+
+```{r}
+save(stromal,file = paste0(outdir,stromal_file))
+```
+
+```{r}
+table(stromal$annotation)
+```
+
+```{r}
+colnames(stromal@meta.data)
+```
+
+
+```{r}
+stromal_cluster_table <- stromal@meta.data %>% group_by(orig.ident,RNA_snn_res.0.1) %>%  
+  summarise(n = n()) %>% mutate(total_by_condition = sum(n)) %>% mutate(percentage = n*100/total_by_condition) %>% ungroup() %>% mutate(total_by_compartment = sum(n)) %>%   mutate(RNA_snn_res.0.1 = as.character(RNA_snn_res.0.1)) %>%
+  mutate(annotation = case_match(RNA_snn_res.0.1,
+    "0" ~ "iCAF",
+    "1" ~ "apCAF",
+    "2" ~ "EC",
+    "3" ~ "myCAF"
+  )) %>% 
+  mutate(celltype = case_match(RNA_snn_res.0.1,
+    "0" ~ "CAF",
+    "1" ~ "CAF",
+    "2" ~ "EC",
+    "3" ~ "CAF")) %>%
+  mutate(compartment = "stromal",immune_cells = "N")
+
+```
+
+
+
+```{r}
+write.table(stromal_cluster_table,file = paste0(outdir,"stromal_cluster_info_table.tsv"),sep = "\t",quote = F,row.names = F)
+```
+
+```{r}
+stromal@meta.data <- stromal@meta.data %>%
+  mutate(celltype = case_match(RNA_snn_res.0.1,
+    "0" ~ "CAF",
+    "1" ~ "CAF",
+    "2" ~ "EC",
+    "3" ~ "CAF")) %>%
+  mutate(compartment = "stromal",immune_cells = "N")
+```
+
+```{r}
+stromal_table <- stromal@meta.data
+
+stromal_table <- cbind(stromal@reductions$umap@cell.embeddings,stromal_table)
+
+stromal_table <- cbind(stromal@reductions$tsne@cell.embeddings,stromal_table)
+```
+
+```{r}
+write.table(stromal_table,file = paste0(outdir,"stromal_cells_visualization_table.tsv"),sep = "\t",quote = F,row.names = F)
+```
+
+
+
+```{r}
+save(stromal,file = paste0(outdir,"stromal_V2p4.Robj"))
+```
+
+
+```{r}
+load(paste0(outdir,myeloid_file))
+```
+
+```{r}
+table(myeloid$annotation)
+```
+
+
+
+```{r}
+myeloid_cluster_table <- myeloid@meta.data %>% group_by(orig.ident,RNA_snn_res.0.7) %>%  
+  summarise(n = n()) %>% mutate(total_by_condition = sum(n)) %>% mutate(percentage = n*100/total_by_condition) %>% ungroup() %>% mutate(total_by_compartment = sum(n)) %>% mutate(RNA_snn_res.0.7 = as.character(RNA_snn_res.0.7)) %>%
+   mutate(annotation = case_match(
+    RNA_snn_res.0.7,
+    "0" ~ "Mono/Mac_1: M1-like 1",
+    "1" ~ "Mono/Mac_2: Mertk- Ccr2+ M1-like",
+    "2" ~ "Mono/Mac_3: Mertk+ Ccr2- Arg- M2-like",
+    "3" ~ "Mono/Mac_4: Arg1+ Ifitm1+",
+    "4" ~ "Mono/Mac_5: Mertk+ Ccr2- Arg1+ M2-like",
+    "5" ~ "Mono/Mac_6: Rsad2 high M1-like",
+    "6" ~ "Mono/Mac_7: M1-like 2",
+    "7" ~ "Proliferating Mono/Mac",
+    "8" ~ "Neutrophil_1",
+    "9" ~ "Neutrophil_2",
+    "10" ~ "Neutrophil_3",
+    "11" ~ "cDC2_like",
+    "12" ~ "Mono/Mac_8: Mertk - Ccr2+ Mrc1- Il1r2- M2-like",
+    "13" ~ "Mast cell",
+    "14" ~ "cDC2",
+    "15" ~ "cDC1",
+    "16" ~ "Mono/Mac_9: Mertk+ Ccr2+ M2-like",
+    "17" ~ "pDC"
+  ) ) %>%
+  mutate(celltype = case_match(RNA_snn_res.0.7,
+    "0" ~ "Mono/Mac",
+    "1" ~ "Mono/Mac",
+    "2" ~ "Mono/Mac",
+    "3" ~ "Mono/Mac",
+    "4" ~ "Mono/Mac",
+    "5" ~ "Mono/Mac",
+    "6" ~ "Mono/Mac",
+    "7" ~ "Mono/Mac",
+    "8" ~ "Neutrophil",
+    "9" ~ "Neutrophil",
+    "10" ~ "Neutrophil",
+    "11" ~ "DC",
+    "12" ~ "Mono/Mac",
+    "13" ~ "Mast cell",
+    "14" ~ "DC",
+    "15" ~ "DC",
+    "16" ~ "Mono/Mac",
+    "17" ~ "DC")) %>%
+  mutate(compartment = "myeloid",immune_cells = "Y")
+```
+
+```{r}
+write.table(myeloid_cluster_table,file = paste0(outdir,"myeloid_cluster_info_table.tsv"),sep = "\t",quote = F,row.names = F)
+```
+
+
+
+```{r}
+myeloid@meta.data <- myeloid@meta.data %>%
+  mutate(celltype = case_match(RNA_snn_res.0.7,
+    "0" ~ "Mono/Mac",
+    "1" ~ "Mono/Mac",
+    "2" ~ "Mono/Mac",
+    "3" ~ "Mono/Mac",
+    "4" ~ "Mono/Mac",
+    "5" ~ "Mono/Mac",
+    "6" ~ "Mono/Mac",
+    "7" ~ "Mono/Mac",
+    "8" ~ "Neutrophil",
+    "9" ~ "Neutrophil",
+    "10" ~ "Neutrophil",
+    "11" ~ "DC",
+    "12" ~ "Mono/Mac",
+    "13" ~ "Mast cell",
+    "14" ~ "DC",
+    "15" ~ "DC",
+    "16" ~ "Mono/Mac",
+    "17" ~ "DC")) %>%
+  mutate(compartment = "myeloid",immune_cells = "Y")
+```
+
+```{r}
+myeloid_table <- myeloid@meta.data
+
+myeloid_table <- cbind(myeloid@reductions$umap@cell.embeddings,myeloid_table)
+
+myeloid_table <- cbind(myeloid@reductions$tsne@cell.embeddings,myeloid_table)
+```
+
+```{r}
+write.table(myeloid_table,file = paste0(outdir,"myeloid_cells_visualization_table.tsv"),sep = "\t",quote = F,row.names = F)
+```
+
+
+```{r}
+save(myeloid,file=paste0(outdir,"myeloid_V2p4.Robj"))
+```
+
+
+
+```{r}
+load(paste0(outdir,lymphoid_file))
+```
+
+```{r}
+table(lymphoid$annotation)
+```
+
+```{r}
+lymphoid_cluster_table <- lymphoid@meta.data %>% group_by(orig.ident,annotation) %>%  
+  summarise(n = n()) %>% mutate(total_by_condition = sum(n)) %>% mutate(percentage = n*100/total_by_condition) %>% ungroup() %>% mutate(total_by_compartment = sum(n)) %>%
+  mutate(celltype = case_match(annotation,
+    "CD4 T" ~ "T cell",
+    "CD8 Teff" ~ "T cell",
+    "CD8 Tex" ~ "T cell",
+    "CD8 Tnaive" ~ "T cell",
+    "Ifn-responsive T" ~ "T cell",
+    "NK_1" ~ "NK",
+    "NK_2" ~ "NK",
+    "NK_3" ~ "NK",
+    "NK_4" ~ "NK",
+    "Proliferating NK" ~ "NK",
+    "Proliferative CD8" ~ "T cell")) %>%
+  mutate(compartment = "lymphoid",immune_cells = "Y")
+```
+
+```{r}
+write.table(lymphoid_cluster_table,file = paste0(outdir,"lymphoid_cluster_info_table.tsv"),sep = "\t",quote = F,row.names = F)
+```
+
+```{r}
+lymphoid@meta.data <- lymphoid@meta.data %>%
+ mutate(celltype = case_match(annotation,
+    "CD4 T" ~ "T cell",
+    "CD8 Teff" ~ "T cell",
+    "CD8 Tex" ~ "T cell",
+    "CD8 Tnaive" ~ "T cell",
+    "Ifn-responsive T" ~ "T cell",
+    "NK_1" ~ "NK",
+    "NK_2" ~ "NK",
+    "NK_3" ~ "NK",
+    "NK_4" ~ "NK",
+    "Proliferating NK" ~ "NK",
+    "Proliferative CD8" ~ "T cell")) %>%
+  mutate(compartment = "lymphoid",immune_cells = "Y")
+```
+
+
+```{r}
+lymphoid_table <- lymphoid@meta.data
+
+lymphoid_table <- cbind(lymphoid@reductions$umap@cell.embeddings,lymphoid_table)
+
+lymphoid_table <- cbind(lymphoid@reductions$tsne@cell.embeddings,lymphoid_table)
+```
+
+```{r}
+write.table(lymphoid_table,file = paste0(outdir,"lymphoid_cells_visualization_table.tsv"),sep = "\t",quote = F,row.names = F)
+```
+
+```{r}
+save(lymphoid,file=paste0(outdir,"lymphoid_V2p4.Robj"))
+```
+
+
+## merge and generate immune cell compartment
+
+```{r}
+immune_cells <- merge(myeloid,lymphoid)
+```
+
+```{r}
+immune_cells <- NormalizeData(immune_cells,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+immune_cells <- FindVariableFeatures(object = immune_cells, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+VariableFeatures(immune_cells) <-  VariableFeatures(immune_cells) [!grepl("^Tra|^Trab|^Igh|^Igk|Mamu-a", VariableFeatures(immune_cells))]
+VariableFeaturePlot(immune_cells,selection.method = "mean.var.plot")
+
+immune_cells <- ScaleData(object = immune_cells, features = VariableFeatures(object = immune_cells), vars.to.regress = c("nCount_RNA", "percent.mt"))
+immune_cells <- RunPCA(object = immune_cells,
+                features =  VariableFeatures(object = immune_cells),
+                dims = 1:50)
+gc()
+
+```
+
+```{r}
+ElbowPlot(immune_cells,ndims = 50)
+```
+
+```{r}
+immune_cells <- RunHarmony(object = immune_cells, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+immune_cells <- RunUMAP(immune_cells,dims = 1:40,reduction = "harmony")
+immune_cells <- RunTSNE(immune_cells,dims = 1:40,reduction = "harmony")
+
+immune_cells <- FindNeighbors(immune_cells, dims = 1:40,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  immune_cells <- FindClusters(object = immune_cells, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DimPlot(immune_cells)
+```
+
+```{r}
+immune_cells_table <- immune_cells@meta.data
+
+immune_cells_table <- cbind(immune_cells@reductions$umap@cell.embeddings,immune_cells_table)
+
+immune_cells_table <- cbind(immune_cells@reductions$tsne@cell.embeddings,immune_cells_table)
+```
+
+```{r}
+write.table(immune_cells_table,file = paste0(outdir,"immune_cells_visualization_table.tsv"),sep = "\t",quote = F,row.names = F)
+```
+
+```{r}
+table(immune_cells$celltype)
+```
+
+
+```{r}
+table(immune_cells$compartment)
+```
+
+```{r}
+immune_cells_cluster_table <- immune_cells@meta.data %>% group_by(orig.ident,celltype) %>%  
+  summarise(n = n()) %>% mutate(total_by_condition = sum(n)) %>% mutate(percentage = n*100/total_by_condition) %>% ungroup() %>% mutate(total = sum(n)) %>%
+  mutate(immune_cells = "Y",compartment =
+           case_match(celltype,
+                      "DC" ~ "myeloid",
+                      "Mast cell" ~ "myeloid",
+                      "Mono/Mac" ~ "myeloid",
+                      "Neutrophil" ~ "myeloid",
+                      "T cell" ~ "lymphoid",
+                      "NK" ~ "lymphoid"))
+
+
+```
+
+```{r}
+write.table(lymphoid_cluster_table,file = paste0(outdir,"immune_cells_celltype_info_table.tsv"),sep = "\t",quote = F,row.names = F)
+```
+
+```{r}
+immune_cells_cluster_table <- immune_cells@meta.data %>% group_by(orig.ident,annotation) %>%  
+  summarise(n = n()) %>% mutate(total_by_condition = sum(n)) %>% mutate(percentage = n*100/total_by_condition) %>% ungroup() %>% mutate(total = sum(n)) %>%
+  mutate(immune_cells = "Y")
+```
+
+```{r}
+write.table(immune_cells_cluster_table,file = paste0(outdir,"immune_cells_annotation_info_table.tsv"),sep = "\t",quote = F,row.names = F)
+```
+
+
+```{r}
+save(immune_cells,file = paste0(outdir,"immune_cells_V2p4.Robj"))
+```
+
+## merge whole dataset
+
+```{r}
+whole <- merge(x = myeloid, y = c(lymphoid,stromal))
+```
+
+
+```{r}
+whole <- NormalizeData(object = whole, normalization.method = "LogNormalize", scale.factor = 10000)
+#there is no need to normalize again; normalization is cell specific
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(whole) <-  VariableFeatures(whole) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(whole))]
+VariableFeaturePlot(whole)
+
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+whole <- RunUMAP(whole,dims = 1:40,reduction = "harmony")
+whole <- RunTSNE(whole,dims = 1:40,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:40,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+DimPlot(whole,label=T)
+```
+
+
+```{r}
+colnames(whole@meta.data)
+```
+
+```{r}
+table(whole$compartment)
+table(whole$immune_cells)
+table(whole$celltype)
+```
+
+```{r}
+whole_table <- whole@meta.data
+
+whole_table <- cbind(whole@reductions$umap@cell.embeddings,whole_table)
+
+whole_table <- cbind(whole@reductions$tsne@cell.embeddings,whole_table)
+```
+
+```{r}
+write.table(whole_table,file = paste0(outdir,"whole_visualization_table.tsv"),sep = "\t",quote = F,row.names = F)
+```
+
+
+```{r}
+whole_cluster_table <- whole@meta.data %>% group_by(orig.ident,celltype) %>%  
+  summarise(n = n()) %>% mutate(total_by_condition = sum(n)) %>% mutate(percentage = n*100/total_by_condition) %>% ungroup() %>% mutate(total = sum(n))
+```
+
+```{r}
+write.table(whole_cluster_table,file = paste0(outdir,"whole_celltype_info_table.tsv"),sep = "\t",quote = F,row.names = F)
+```
+
+```{r}
+whole_cluster_table <- whole@meta.data %>% group_by(orig.ident,annotation) %>%  
+  summarise(n = n()) %>% mutate(total_by_condition = sum(n)) %>% mutate(percentage = n*100/total_by_condition) %>% ungroup() %>% mutate(total = sum(n))
+```
+
+```{r}
+write.table(whole_cluster_table,file = paste0(outdir,"whole_annotation_info_table.tsv"),sep = "\t",quote = F,row.names = F)
+```
+
+```{r}
+save(whole,file = paste0(outdir,"whole_V2p4.Robj"))
+```
+
+### if you realize you need to change something from whole :)
+
+```{r}
+load(paste0(outdir,"whole_V2p4.Robj"))
+```
+
+
+```{r}
+length(whole@meta.data$compartment)
+stromal_idx <- c(1:length(whole@meta.data$compartment))[whole@meta.data$compartment == "stromal"]
+```
+
+```{r}
+hashtag_new <- whole@meta.data[stromal_idx,c("B0301_log10","B0302_log10")] %>%  
+  mutate(hashtag = case_when(
+  (B0301_log10 > 2 ) & (B0302_log10 > 2) ~ "double_high",
+  (B0301_log10 > 2 ) & (B0302_log10 <= 2) ~ "Reporter+",
+  (B0301_log10 <= 2) & (B0302_log10 > 2) ~ "Reporter-",
+  .default = "double_low"
+))
+```
+
+```{r}
+whole@meta.data$hashtag[stromal_idx] <- hashtag_new$hashtag
+```
+
+```{r}
+table(whole@meta.data$hashtag[stromal_idx])
+```
+
+```{r}
+table(whole@meta.data$compartment[stromal_idx])
+table(whole@meta.data$celltype[stromal_idx])
+```
+
+```{r}
+save(whole,file = paste0(outdir,"whole_V2p4.Robj"))
+```
+
+### Export new tables
+
+To make everything easier, I'll just create 1 table for all categories but all available metadate. The table is meant for counting the number of cells in different conditions. 
+
+```{r}
+table(whole$annotation_V2)
+```
+
+```{r}
+table(whole$annotation)
+```
+I'm a bit dumb right now and I don't know how I can create a table with sum of different levels in some sitting:( so I'll try appending columns. I'll use information from table() and manually add the numbers using case_switch :)))
+
+But I realize that you could possibly merge by the same column :), so while there are multiple ways, some are possibly more efficient than others. I'm not sure which one is more efficient, but I'll do merge. DOuble-checking the summation is needed.
+
+```{r}
+df_base <- whole@meta.data %>% group_by(orig.ident,hashtag,annotation,annotation_V2,celltype,compartment,immune_cells) %>% summarise(n_cell_annotation = n()) %>% ungroup() 
+df_annV2 <- whole@meta.data %>% group_by(orig.ident,hashtag,annotation_V2) %>% summarise(n_cell_annotation_V2 = n())
+df_celltype <- whole@meta.data %>% group_by(orig.ident,hashtag,celltype) %>% summarise(n_by_celltype = n())
+df_compartment <- whole@meta.data %>% group_by(orig.ident,hashtag,compartment) %>% summarise(n_by_compartment = n())
+df_imm <- whole@meta.data %>% group_by(orig.ident,hashtag,immune_cells) %>% summarise(n_by_imm = n())
+```
+
+```{r}
+full_table <- full_join(df_base, df_annV2,by= c("annotation_V2","orig.ident","hashtag"))
+full_table <- full_join(full_table, df_celltype,by= c("celltype","orig.ident","hashtag"))
+full_table <- full_join(full_table, df_compartment,by= c("compartment","orig.ident","hashtag"))
+full_table <- full_join(full_table, df_imm,by= c("immune_cells","orig.ident","hashtag"))
+```
+
+Now I'll add the total numbers for celltype, compartment, and immune-cells-or-not by sample. (It is meaningless to tally in terms of total of all samples. The tally only make sense when it is performed sample-wise, because samples don't share the equal number of cells.) I'll also need to rename orig.ident as sample
+
+```{r}
+total_df_ann <- whole@meta.data %>% group_by(orig.ident,annotation) %>% summarise(total_by_annotation_by_sample = n()) %>% ungroup() 
+total_df_annV2 <- whole@meta.data %>% group_by(orig.ident,annotation_V2) %>% summarise(total_by_annotationV2_by_sample = n()) %>% ungroup() 
+total_df_celltype <- whole@meta.data %>% group_by(orig.ident,celltype) %>% summarise(total_by_celltype_by_sample = n()) %>% ungroup()
+total_df_compartment <- whole@meta.data %>% group_by(orig.ident,compartment) %>% summarise(total_by_compartment_by_sample = n()) %>% ungroup()
+total_df_imm <- whole@meta.data %>% group_by(orig.ident,immune_cells) %>% summarise(total_by_imm_by_sample = n()) %>% ungroup()
+
+```
+
+```{r}
+full_table <- full_join(full_table, total_df_ann,by= c("annotation","orig.ident"))
+full_table <- full_join(full_table, total_df_annV2,by= c("annotation_V2","orig.ident"))
+full_table <- full_join(full_table, total_df_celltype,by= c("celltype","orig.ident"))
+full_table <- full_join(full_table, total_df_compartment,by= c("compartment","orig.ident"))
+full_table <- full_join(full_table, total_df_imm,by= c("immune_cells","orig.ident"))
+```
+
+```{r}
+full_table <- full_table %>% rename(sample = orig.ident)
+```
+
+```{r}
+write.table(full_table,file = paste0(outdir,"full_annotation_metadata_and_count_table.tsv"),sep = "\t",quote = F,row.names = F)
+```
+
+Now I need to create a version of single positive only. 
+
+```{r}
+table(full_table$hashtag)
+```
+
+
+```{r}
+SP_meta <- whole@meta.data %>% filter(hashtag == "Reporter+" | hashtag == "Reporter-")
+```
+
+```{r}
+table(SP_meta$hashtag)
+```
+
+```{r}
+df_base <- SP_meta %>% group_by(orig.ident,hashtag,annotation,annotation_V2,celltype,compartment,immune_cells) %>% summarise(n_cell_annotation = n()) %>% ungroup() 
+df_annV2 <- SP_meta %>% group_by(orig.ident,hashtag,annotation_V2) %>% summarise(n_cell_annotation_V2 = n())
+df_celltype <- SP_meta %>% group_by(orig.ident,hashtag,celltype) %>% summarise(n_by_celltype = n())
+df_compartment <- SP_meta %>% group_by(orig.ident,hashtag,compartment) %>% summarise(n_by_compartment = n())
+df_imm <- SP_meta %>% group_by(orig.ident,hashtag,immune_cells) %>% summarise(n_by_imm = n())
+
+SP_table <- full_join(df_base, df_annV2,by= c("annotation_V2","orig.ident","hashtag"))
+SP_table <- full_join(SP_table, df_celltype,by= c("celltype","orig.ident","hashtag"))
+SP_table <- full_join(SP_table, df_compartment,by= c("compartment","orig.ident","hashtag"))
+SP_table <- full_join(SP_table, df_imm,by= c("immune_cells","orig.ident","hashtag"))
+
+total_df_ann <- SP_meta %>% group_by(orig.ident,annotation) %>% summarise(total_by_annotation_by_sample = n()) %>% ungroup() 
+total_df_annV2 <- SP_meta %>% group_by(orig.ident,annotation_V2) %>% summarise(total_by_annotationV2_by_sample = n()) %>% ungroup() 
+total_df_celltype <- SP_meta %>% group_by(orig.ident,celltype) %>% summarise(total_by_celltype_by_sample = n()) %>% ungroup()
+total_df_compartment <- SP_meta %>% group_by(orig.ident,compartment) %>% summarise(total_by_compartment_by_sample = n()) %>% ungroup()
+total_df_imm <- SP_meta %>% group_by(orig.ident,immune_cells) %>% summarise(total_by_imm_by_sample = n()) %>% ungroup()
+
+SP_table <- full_join(SP_table, total_df_ann,by= c("annotation","orig.ident"))
+SP_table <- full_join(SP_table, total_df_annV2,by= c("annotation_V2","orig.ident"))
+SP_table <- full_join(SP_table, total_df_celltype,by= c("celltype","orig.ident"))
+SP_table <- full_join(SP_table, total_df_compartment,by= c("compartment","orig.ident"))
+SP_table <- full_join(SP_table, total_df_imm,by= c("immune_cells","orig.ident"))
+
+```
+
+```{r}
+write.table(SP_table,file = paste0(outdir,"single_positive_annotation_metadata_and_count_table.tsv"),sep = "\t",quote = F,row.names = F)
+```
+
+
