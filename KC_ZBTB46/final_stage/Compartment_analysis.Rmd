@@ -1,0 +1,80 @@
+---
+title: "Analysis of prop and functional differences"
+output: html_document
+date: "2024-03-04"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(data.table)
+```
+
+First make proportion plots for cell types against corresponding major compartments.
+
+```{r}
+full_table <- read.table(file = "full_annotation_metadata_and_count_table.tsv",header = T,sep = "\t")
+sp_table <- read.table(file = "single_positive_annotation_metadata_and_count_table.tsv",header = T,sep = "\t")
+```
+
+```{r}
+ggplot(full_table,aes(x= hashtag, y = n_cell_annotation*100/total_by_imm_by_sample))+
+  geom_bar(stat = "identity")+
+  facet_wrap(~annotation_V2,scales = "free") + ylab("% of corresponding compartment") +ggtitle("Proportion of immune cells or non-immune cells within their corresponding compartments")
+g <- ggplot(full_table,aes(x= hashtag, y = n_cell_annotation*100/total_by_imm_by_sample))+
+  geom_bar(stat = "identity")+
+  facet_wrap(~annotation_V2,scales = "free") + ylab("% of corresponding compartment") +ggtitle("Proportion of immune cells or non-immune cells within their corresponding compartments")
+ggsave(filename = "Prop_full_by_compartment.pdf",plot = g, units = "cm",width = 40,height = 30)
+```
+
+```{r}
+sp_table$condition <- paste(sp_table$orig.ident,sp_table$hashtag,sep = "_")
+```
+
+```{r}
+full_table$condition <- paste(full_table$sample,full_table$hashtag,sep = "_")
+```
+
+```{r}
+ggplot(sp_table,aes(x= condition, y = n_cell_annotation*100/total_by_imm_by_sample))+
+  geom_bar(stat = "identity")+
+  facet_wrap(~annotation_V2,scales = "free") + ylab("% of corresponding compartment") +ggtitle("Proportion of immune cells or non-immune cells within their corresponding compartments")
+g <- ggplot(sp_table,aes(x= condition, y = n_cell_annotation*100/total_by_imm_by_sample))+
+  geom_bar(stat = "identity")+ RotatedAxis()+
+  facet_wrap(~annotation_V2,scales = "free") + ylab("% of corresponding compartment") +ggtitle("Proportion of immune cells or non-immune cells within their corresponding compartments")
+ggsave(filename = "Prop_SP_by_compartment.pdf",plot = g, units = "cm",width = 40,height = 30)
+```
+
+```{r}
+write.table(sp_table,file = "single_positive_annotation_metadata_and_count_table_updated.tsv")
+```
+
+```{r}
+write.table(full_table,file = "full_annotation_metadata_and_count_table_updated.tsv")
+```
+
+## SCENIC
+
+```{r}
+dbFiles <- c("https://resources.aertslab.org/cistarget/databases/mus_musculus/mm9/refseq_r45/mc9nr/gene_based/mm9-500bp-upstream-7species.mc9nr.feather",
+"https://resources.aertslab.org/cistarget/databases/mus_musculus/mm9/refseq_r45/mc9nr/gene_based/mm9-tss-centered-10kb-7species.mc9nr.feather")
+# dir.create("cisTarget_databases"); setwd("cisTarget_databases") # if needed
+for(featherURL in dbFiles)
+{
+  download.file(featherURL, destfile=basename(featherURL)) # saved in current dir
+}
+```
+
+Extract data from seurat object
+
+```{r}
+library(SingleCellExperiment)
+## Get data from sce object:
+exprMat <- counts(sce)
+cellInfo <- colData(sce)
+
+cellInfo <- data.frame(seuratCluster=Idents(seuratObject))
+```
+
+
+

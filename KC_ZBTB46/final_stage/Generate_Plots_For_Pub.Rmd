@@ -1,0 +1,1765 @@
+---
+title: "Generate Plot for manuscript"
+output: html_document
+date: "2024-03-06"
+---
+
+```{r}
+library(Seurat) # youb know why
+library(tidyverse) # base package for data organization and plotting
+library(RColorBrewer) # for making palettes
+library(gridExtra) # for arranging multiple plots
+library(data.table) # well...
+library(ComplexHeatmap)
+library(circlize)
+library(ggforce)
+library(ggrepel)
+```
+
+```{r}
+# define paths
+indir <- "rds_V2/"
+outdir <- "plots/"
+rds_pattern_list <- "" # in case needed for automation
+dir.create(outdir)
+```
+
+```{r}
+list.files(path = indir)
+```
+
+```{r}
+whole_file <- "whole_V2p4.Robj"
+lymphoid_file <- "lymphoid_V2p4.Robj"
+stromal_file <- "stromal_V2p4.Robj"
+myeloid_file <- "myeloid_V2p4.Robj"
+```
+
+Note:
+Since seurat automatically generate color coding based on alphabetical order of the available labels, to make color-coding consistent across plots, it is better to customize color coding base on some category.
+
+
+
+# Fig 1: Whole
+
+## A) Overview TSNE plot and FeaturePlots for support
+
+```{r}
+load(paste0(indir,whole_file))
+```
+
+```{r}
+colnames(whole@meta.data)
+```
+```{r}
+whole$sample <- whole$orig.ident
+```
+
+
+We do need to update color coding
+
+```{r}
+gg_color_hue <- function(n) {
+  hues = seq(15, 375, length = n + 1)
+  hcl(h = hues, l = 65, c = 100)[1:n]
+}
+celltype_pal_whole <- gg_color_hue(11) #change number of cell types 
+```
+
+
+
+
+```{r}
+whole@meta.data <- whole@meta.data %>% 
+  mutate(annotation_main_cluster = as.character(RNA_snn_res.0.6)) %>%
+  mutate(annotation_main = case_match(
+    as.character(RNA_snn_res.0.6),
+    "0" ~ "Mono/Mac",
+    "1" ~ "Mono/Mac",
+    "2" ~ "Mono/Mac",
+    "3" ~ "NK",
+    "4" ~ "Neutrophil",
+    "5" ~ "Mono/Mac",
+    "6" ~ "Mono/Mac",
+    "7" ~ "Proliferating Mono/Mac",
+    "8" ~ "Fibroblast",
+    "9" ~ "T cells",
+    "10" ~ "Neutrophil",
+    "11" ~ "cDC",
+    "12" ~ "Mast cells",
+    "13" ~ "Cycling NK",
+    "14" ~ "cDC",
+    "15" ~ "cDC",
+    "16" ~ "pDC",
+    "17" ~ "Mono/Mac",
+    "18" ~ "EC"
+  ) )
+```
+
+```{r}
+table(whole$annotation_V2)
+```
+
+
+```{r}
+whole@meta.data <- whole@meta.data %>% mutate(
+  annotation_V2 = case_match(
+    annotation_V2,
+    "cDC1" ~ "cDC",
+    "cDC2" ~ "cDC",
+    "cDC2_like" ~ "cDC",
+    .default = annotation_V2
+  )
+)
+```
+
+```{r}
+table(whole$annotation_main)
+```
+```{r}
+save(whole, file = paste0(indir,whole_file))
+```
+
+
+```{r}
+p1 <- DotPlot(whole, group.by = "RNA_snn_res.0.6",features = c("Adgre1","S100a8","Flt3","Xcr1","Sirpa","Siglech","Cd200r3","Tpsb2","Mki67","Cd3e","Ncr1","Pecam1","Myct1","Col5a2"))+ RotatedAxis()
+p2 <- DotPlot(whole, group.by = "annotation_main",features = c("Adgre1","S100a8","Flt3","Xcr1","Sirpa","Siglech","Cd200r3","Tpsb2","Mki67","Cd3e","Ncr1","Pecam1","Myct1","Col5a2"))+ RotatedAxis()
+g <- grid.arrange(grobs = list(p1,p2),nrow = 2)
+ggsave(filename = paste0(outdir,"Supp_Whole_Dotplot_annotation.pdf"), plot = g, units = "cm",height = 20,width = 24)
+```
+
+
+## Fig 1E
+
+
+
+```{r}
+DimPlot(whole,reduction = "tsne",group.by = "annotation_main",split.by = "sample",cols = celltype_pal_whole)+theme_classic() + theme(plot.title = element_blank())
+```
+
+```{r}
+p1 <- DimPlot(whole,reduction = "tsne",group.by = "annotation_main",split.by = "sample")+ theme(plot.title = element_blank())
+p2 <- DimPlot(whole,reduction = "tsne",group.by = "sample",shuffle = T)+ theme(plot.title = element_blank())+scale_color_manual(name = "Sample", labels = c("control", "treatment"),values = c("black", "red"))
+p3 <- DimPlot(whole,reduction = "tsne",group.by = "sample",split.by = "sample")+ theme(plot.title = element_blank())+scale_color_manual(name = "Sample", labels = c("control", "treatment"),values = c("black", "red"))
+g <- grid.arrange(grobs = list(p1,p2,p3),nrow = 2)
+ggsave(filename = paste0(outdir,"Fig1E_Whole_TSNE_by_condition.pdf"), plot = g, units = "cm",height = 32,width = 48)
+```
+## Fig 1B
+```{r}
+DimPlot(whole,reduction = "tsne",group.by = "celltype")
+DimPlot(whole,reduction = "tsne",group.by = "RNA_snn_res.0.6")
+```
+
+```{r}
+g <- DimPlot(whole,reduction = "tsne",group.by = "annotation_main",label.size = 2.5,label.box = F,label = T) + theme(plot.title = element_blank())# 1A
+ggsave(filename = paste0(outdir,"Fig1B_Whole_TSNE_with_label.pdf"), plot = g, units = "cm",height = 16,width = 24)
+g <- DimPlot(whole,reduction = "tsne",group.by = "annotation_main") + theme(plot.title = element_blank())# 1A
+ggsave(filename = paste0(outdir,"Fig1B_Whole_TSNE_without_label.pdf"), plot = g, units = "cm",height = 16,width = 24)
+```
+
+
+```{r}
+table(whole$annotation_V2)
+length(unique(whole$annotation_V2))
+```
+
+```{r}
+DotPlot(whole, group.by = "annotation_main",features = c("Adgre1","S100a8","Flt3","Xcr1","Sirpa","Siglech","Cd200r3","Tpsb2","Mki67","Cd3e","Ncr1","Pecam1","Myct1","Col5a2"),split.by = "sample")+ RotatedAxis()
+```
+
+```{r eval =F}
+whole@meta.data <- whole@meta.data %>% mutate(
+  annotation_cluster = case_match(
+    annotation_V2,
+    "Mono/Mac_1" ~ "1",
+    "Mono/Mac_2" ~ "2",
+    "Mono/Mac_3" ~ "3",
+    "Mono/Mac_4" ~ "4",
+    "Mono/Mac_5" ~ "5",
+    "Proliferating Mono/Mac" ~ "6",
+    "Neutrophil_1" ~ "7",
+    "Neutrophil_2" ~ "8",
+    "Neutrophil_3" ~ "9",
+    "NK_1" ~ "10",
+    "NK_2" ~ "11",
+    "NK_3" ~ "12",
+    "NK_4" ~ "13",
+    "CD8 Tnaive" ~ "14",
+    "CD8 Teff" ~ "15",
+    "CD8 Tex" ~ "16",
+    "Ifn-responsive T" ~ "17",
+    "CD4 T" ~ "18",
+    "cDC1" ~ "19",
+    "cDC2" ~ "20",
+    "pDC" ~ "21"
+  )
+)
+```
+
+## Fig 1 D marker heatmap
+
+```{r}
+avg_whole <- AggregateExpression(whole, assays = "RNA",features = c("Adgre1","S100a8","Flt3","Xcr1","Sirpa","Siglech","Cd200r3","Tpsb2","Mki67","Cd3e","Ncr1","Pecam1","Myct1","Col5a2"), return.seurat = T,group.by = c("annotation_main","sample"))
+```
+
+```{r}
+#avg_whole$sample
+avg_whole$annotation_main
+```
+
+
+```{r}
+DoHeatmap(avg_whole,features = c("Adgre1","S100a8","Flt3","Xcr1","Sirpa","Siglech","Cd200r3","Tpsb2","Mki67","Cd3e","Ncr1","Pecam1","Myct1","Col5a2"),size = 2,draw.lines = F)+
+  guides(fill="none")+theme(legend.position="none")
+```
+
+```{r}
+names(celltype_pal_whole) <- unique(unname(avg_whole$annotation_main))
+col = list(
+  Cell_type = celltype_pal_whole,
+  Sample = c("Control"="black", "ZBTB46" = "red")
+)
+ha <- HeatmapAnnotation(
+   Cell_type = unname(avg_whole$annotation_main), Sample = unname(avg_whole$sample),
+  col = col
+)
+mat <-  GetAssayData(avg_whole,layer = "scale.data")
+
+Heatmap(mat,name = "whole dataset",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+```
+
+```{r}
+mat <- as.data.frame(mat)
+write.table(mat,file = "whole_marker_scaled_exp.tsv",sep = "\t",row.names = F,col.names = F)
+row_ann <- rownames(mat)
+write.table(row_ann,file = "whole_marker_row_ann.tsv",sep = "\t",row.names = F,col.names = F)
+col_ann <- colnames(mat)
+write.table(col_ann,file = "whole_marker_col_ann.tsv",sep = "\t",row.names = F,col.names = F)
+```
+
+```{r}
+pdf(paste0(outdir,"Fig1D_Whole_marker_Heatmap.pdf"))
+Heatmap(mat,name = "whole dataset",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+dev.off()
+```
+
+
+
+## 1C)
+
+```{r}
+Idents(whole) <- whole$annotation_main
+plts <- lapply(c("Adgre1","S100a8","Flt3","Xcr1","Sirpa","Siglech","Cd200r3","Tpsb2","Mki67","Cd3e","Ncr1","Pecam1","Myct1","Col5a2"),function(x){
+  FeaturePlot(whole,reduction = "tsne",features = x,label = F,order = F,label.size = 2.5,alpha = 1,label.color = "black",pt.size = 1.5) +scale_colour_gradientn(colors = c("beige", "red", "darkred"))
+})
+g <- grid.arrange(grobs = plts,nrow = 4)
+ggsave(filename = paste0(outdir,"Whole_FeaturePlot_pmarkers_visual_enhanced_shuffled.pdf"), plot = g, units = "cm",height = 75,width = 75)
+
+```
+
+```{r}
+Idents(whole) <- whole$annotation_main
+plts <- lapply(c("Adgre1","S100a8","Flt3","Xcr1","Sirpa","Siglech","Cd200r3","Tpsb2","Mki67","Cd3e","Ncr1","Pecam1","Myct1","Col5a2"),function(x){
+  FeaturePlot(whole,reduction = "tsne",features = x,label = F) +scale_colour_gradientn(colors = c("grey", "red", "purple"))
+})
+g <- grid.arrange(grobs = plts,nrow = 4)
+ggsave(filename = paste0(outdir,"Whole_FeaturePlot_pmarkers_without_label.pdf"), plot = g, units = "cm",height = 75,width = 75)
+```
+
+
+```{r}
+save(whole,file = paste0(indir,whole_file))
+```
+
+```{r}
+rm(whole)
+gc()
+```
+
+# Fig 2 Lymphoid
+
+
+```{r}
+load(paste0(indir,lymphoid_file))
+```
+
+
+```{r}
+colnames(lymphoid@meta.data)
+```
+```{r}
+lymphoid@meta.data <- lymphoid@meta.data %>% mutate(
+  annotation = case_match(
+    annotation,
+    "activated T" ~ "Activated T",
+    .default = annotation
+  )
+)
+```
+
+Need DE within lymphoids
+```{r}
+Idents(lymphoid) <- lymphoid$annotation
+
+lymphoid_markers <- FindAllMarkers(lymphoid)
+```
+
+```{r}
+write.table(lymphoid_markers,file = "lymphoid_annotation_markers.tsv",sep = "\t",row.names = F)
+```
+
+```{r}
+lymphoid_markers <- read.table(file = "expression_table_and_markers/lymphoid_annotation_markers.tsv",header = T,sep = "\t")
+```
+
+```{r}
+NK <- subset(lymphoid, subset = celltype == "NK")
+T_cell <- subset(lymphoid, subset = celltype == "T cell")
+```
+
+```{r}
+Idents(NK) <- NK$annotation
+NK_markers <- FindAllMarkers(NK)
+write.table(NK_markers,file = "within_cell_type_DE/NK_annotation_markers.tsv",sep = "\t",row.names = F)
+```
+
+
+```{r}
+Idents(T_cell) <- T_cell$annotation
+T_cell_markers <- FindAllMarkers(T_cell)
+write.table(T_cell_markers,file = "within_cell_type_DE/T_cell_annotation_markers.tsv",sep = "\t",row.names = F)
+```
+
+
+
+
+```{r}
+DimPlot(lymphoid,reduction = "tsne",group.by = "annotation",label = T)
+```
+## Fig 2A
+```{r}
+g <- DimPlot(lymphoid,reduction = "tsne",group.by = "annotation",label.size = 2.5,label.box = F,label = T) + theme(plot.title = element_blank())# 1A
+ggsave(filename = paste0(outdir,"Fig2A_lymphoid_TSNE_with_label.pdf"), plot = g, units = "cm",height = 8,width = 16)
+g <- DimPlot(lymphoid,reduction = "tsne",group.by = "annotation") + theme(plot.title = element_blank())# 1A
+ggsave(filename = paste0(outdir,"Fig2A_lymphoid_TSNE_without_label.pdf"), plot = g, units = "cm",height = 8,width = 16)
+```
+
+
+```{r}
+DimPlot(lymphoid, reduction = "tsne", group.by = "annotation",split.by = "orig.ident", label = T)+ guides(color = guide_legend(override.aes = list(size=4), ncol=2) )
+```
+```{r}
+DotPlot(lymphoid,features = c("Pdcd1","Havcr2","Isg15","Junb","Cebpb","Cx3cr1","Ccl3","Ccl5","Cd69","Gzma","Gzmb","Ncr1","Cd8a","Cd4","Foxp3"),group.by = "annotation")+RotatedAxis()
+```
+
+```{r}
+Idents(lymphoid) <- lymphoid$annotation
+plts <- lapply(c("Pdcd1","Havcr2","Isg15","Junb","Cebpb","Cx3cr1","Mki67","Cd3e","Cd69","Gzma","Gzmb","Ncr1","Cd8a","Cd4","Foxp3"),function(x){
+  FeaturePlot(lymphoid,reduction = "tsne",features = x,label = F,label.size = 2.5,label.color = "black") +scale_colour_gradientn(colors = c("lightgrey", "red", "purple"))
+})
+g <- grid.arrange(grobs = plts,nrow = 4)
+ggsave(filename = paste0(outdir,"Lymphoid_FeaturePlot_pmarkers_without_label_updated.pdf"), plot = g, units = "cm",height = 50,width = 50)
+```
+Add Mki67 and Cd3e (also test visual enhancement)
+
+```{r}
+FeaturePlot(lymphoid,reduction = "tsne",features = "Mki67",label = F,order = T,label.size = 2.5,alpha = 0.9,label.color = "black",pt.size = 1) +scale_colour_gradientn(colors = c("beige", "red", "darkred"))
+```
+
+```{r}
+Idents(lymphoid) <- lymphoid$annotation
+plts <- lapply(c("Pdcd1","Havcr2","Isg15","Junb","Cebpb","Cx3cr1","Mki67","Cd3e","Cd69","Gzma","Gzmb","Ncr1","Cd8a","Cd4","Foxp3"),function(x){
+ FeaturePlot(lymphoid,reduction = "tsne",features = x,label = F,order = F,label.size = 2.5,alpha = 1,label.color = "black",pt.size = 1) +scale_colour_gradientn(colors = c("beige", "red", "darkred"))
+})
+g <- grid.arrange(grobs = plts,nrow = 4)
+ggsave(filename = paste0(outdir,"Lymphoid_FeaturePlot_pmarkers_without_label_visual_enhanced_shuffled.pdf"), plot = g, units = "cm",height = 50,width = 50)
+```
+
+
+## Fig 2 C
+
+```{r}
+p1 <- DimPlot(lymphoid,reduction = "tsne",group.by = "annotation",split.by = "orig.ident")+ theme(plot.title = element_blank())
+p2 <- DimPlot(lymphoid,reduction = "tsne",group.by = "orig.ident",shuffle = T)+ theme(plot.title = element_blank())+scale_color_manual(name = "Sample", labels = c("control", "treatment"),values = c("black", "red"))
+p3 <- DimPlot(lymphoid,reduction = "tsne",group.by = "orig.ident",split.by = "orig.ident")+ theme(plot.title = element_blank())+scale_color_manual(name = "Sample", labels = c("control", "treatment"),values = c("black", "red"))
+g <- grid.arrange(grobs = list(p1,p2,p3),nrow = 2)
+ggsave(filename = paste0(outdir,"Fig2C_lymphoid_TSNE_by_condition.pdf"), plot = g, units = "cm",height = 16,width = 28)
+```
+
+
+
+
+## Fig 2 D lymphoid heatmap
+
+```{r}
+table(lymphoid$celltype)
+```
+
+
+### T_cell heatmap
+
+```{r}
+T_cells <- subset(lymphoid, subset = celltype == "T cell")
+```
+
+
+```{r}
+avg_T <- AggregateExpression(T_cells, assays = "RNA",features = c("Cd3e","Pdcd1","Havcr2","Isg15","Junb","Cebpb","Ccl3","Ccl5","Cd69","Gzma","Gzmb","Ncr1","Cd8a","Cd4","Foxp3","Mki67","Tigit","Tox","Ccr7","Tcf7","Lef1","Tbx21","Tyrobp","Klrb1c","Ctla4","Lag3","Eomes","Ifng","Xcl1","Cd7","Il2ra","Il7r","Sell","Entpd1", "Lag3", "Ctla4", "Icos", "Cd200", "Hspd1", "Klrc1", "Klrc2", "Cd44", "Havcr2", "Ifitm1", "Ifitm2", "Gzmb", "Gzmd", "Gzme", "Gzmg", "Klrg1", "Serpinb6a", "Serpinb9", "Il10", "Prf1", "Cxcr3", "Ccl5", "Foxo1", "Ncr1", "Sell", "Klra3", "Klra5", "Klra8", "Klra9"), return.seurat = T,group.by = c("annotation","orig.ident"))
+```
+
+
+
+```{r}
+T_pal <- gg_color_hue(6)
+avg_T$sample <- rep(c("Control","ZBTB46"),6)
+names(T_pal) <- unique(unname(avg_T$annotation))
+col = list(
+  Cell_type = T_pal,
+  Sample = c("Control"="black", "ZBTB46" = "red")
+)
+ha <- HeatmapAnnotation(
+   Cell_type = unname(avg_T$annotation), Sample = unname(avg_T$sample),
+  col = col
+)
+mat <-  GetAssayData(avg_T,layer = "scale.data")
+Heatmap(mat,name = "T cells",top_annotation = ha,cluster_rows = T,row_names_gp = grid::gpar(fontsize = 5),cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+```
+
+
+```{r}
+pdf(paste0(outdir,"Fig2D-1_T_picked_marker_Heatmap.pdf"))
+Heatmap(mat,name = "T cells",top_annotation = ha,cluster_rows = T,row_names_gp = grid::gpar(fontsize = 5),cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+dev.off()
+```
+
+```{r}
+T_markers <- read.table(file = "within_cell_type_DE/T_cell_annotation_markers.tsv",sep = "\t",header = T)
+```
+
+
+
+```{r}
+T_markers_selected <- T_markers %>% group_by(cluster) %>% filter(p_val_adj < 0.05 & abs(avg_log2FC) > 1 & pct.2 < 0.8 & pct.1 > 0.1 ) %>% arrange(-abs(avg_log2FC)) %>% filter(!(grepl("^Gm",gene) | (grepl("*Rik$",gene)))) %>% slice_max(order_by = abs(avg_log2FC),n=20)
+```
+
+
+```{r}
+avg_T <- AggregateExpression(T_cells, assays = "RNA",features = unique(c(T_markers_selected$gene,"Entpd1", "Lag3", "Ctla4", "Icos", "Cd200", "Hspd1", "Klrc1", "Klrc2", "Cd44", "Havcr2", "Ifitm2", "Gzmb", "Klrg1", "Serpinb6a", "Serpinb9", "Cxcr3", "Ccl5", "Foxo1", "Ncr1", "Sell", "Klra3", "Klra5", "Klra9")), return.seurat = T,group.by = c("annotation","orig.ident"))
+```
+
+
+```{r}
+T_pal <- gg_color_hue(6)
+avg_T$sample <- rep(c("Control","ZBTB46"),6)
+names(T_pal) <- unique(unname(avg_T$annotation))
+col = list(
+  Cell_type = T_pal,
+  Sample = c("Control"="black", "ZBTB46" = "red")
+)
+ha <- HeatmapAnnotation(
+   Cell_type = unname(avg_T$annotation), Sample = unname(avg_T$sample),
+  col = col
+)
+mat <-  GetAssayData(avg_T,layer = "scale.data")
+Heatmap(mat,name = "T cells",top_annotation = ha,cluster_rows = T,row_names_gp = grid::gpar(fontsize = 2),cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+```
+
+```{r}
+pdf(paste0(outdir,"Fig2D-1_T_marker_from_seurat_Heatmap.pdf"))
+Heatmap(mat,name = "T cells",top_annotation = ha,cluster_rows = T,row_names_gp = grid::gpar(fontsize = 2),cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+dev.off()
+```
+
+
+```{r}
+avg_T <- AggregateExpression(T_cells, assays = "RNA",features = unique(c(T_markers_selected$gene,c("Pdcd1","Havcr2","Isg15","Junb","Cebpb","Ccl3","Ccl5","Cd69","Gzma","Gzmb","Ncr1","Cd8a","Cd4","Foxp3","Mki67","Tigit","Tox","Ccr7","Tcf7","Lef1","Tbx21","Tyrobp","Klrb1c","Ctla4","Lag3","Eomes","Ifng","Xcl1","Cd7","Il2ra","Il7r","Sell","Entpd1", "Lag3", "Ctla4", "Icos", "Cd200", "Hspd1", "Klrc1", "Klrc2", "Cd44", "Havcr2", "Ifitm1", "Ifitm2", "Gzmb", "Gzmd", "Gzme", "Gzmg", "Klrg1", "Serpinb6a", "Serpinb9", "Il10", "Prf1", "Cxcr3", "Ccl5", "Foxo1", "Ncr1", "Sell", "Klra3", "Klra5", "Klra8", "Klra9"))), return.seurat = T,group.by = c("annotation","orig.ident"))
+```
+
+```{r}
+T_pal <- gg_color_hue(6)
+avg_T$sample <- rep(c("Control","ZBTB46"),6)
+names(T_pal) <- unique(unname(avg_T$annotation))
+col = list(
+  Cell_type = T_pal,
+  Sample = c("Control"="black", "ZBTB46" = "red")
+)
+ha <- HeatmapAnnotation(
+   Cell_type = unname(avg_T$annotation), Sample = unname(avg_T$sample),
+  col = col
+)
+mat <-  GetAssayData(avg_T,layer = "scale.data")
+Heatmap(mat,name = "T cells",top_annotation = ha,cluster_rows = T,row_names_gp = grid::gpar(fontsize = 2),cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+```
+
+```{r}
+pdf(paste0(outdir,"Fig2D-1_T_marker_combined_Heatmap.pdf"))
+Heatmap(mat,name = "T cells",top_annotation = ha,cluster_rows = T,row_names_gp = grid::gpar(fontsize = 2),cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+dev.off()
+```
+
+```{r}
+ht <- Heatmap(mat,name = "T cells",top_annotation = ha,cluster_rows = T,row_names_gp = grid::gpar(fontsize = 2),cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+
+ht <- draw(ht)
+clusterlist = row_order(ht)
+write.table(rownames(mat)[clusterlist],file = paste0(outdir,"T_combined_gene_list_sorted.txt"),sep = "\t",row.names = F,col.names = F,quote = F)
+```
+
+
+### NK subsets
+
+```{r}
+NK <- subset(lymphoid, subset = celltype == "NK")
+```
+
+
+```{r}
+avg_NK <- AggregateExpression(NK, assays = "RNA",features = c("Cd3e","Pdcd1","Havcr2","Isg15","Junb","Cebpb","Ccl3","Ccl5","Cd69","Gzma","Gzmb","Ncr1","Cd8a","Cd4","Foxp3","Mki67","Tigit","Tox","Ccr7","Tcf7","Lef1","Tbx21","Tyrobp","Klrb1c","Ctla4","Lag3","Eomes","Ifng","Xcl1","Cd7","Il2ra","Il7r","Sell","Entpd1", "Lag3", "Ctla4", "Icos", "Cd200", "Hspd1", "Klrc1", "Klrc2", "Cd44", "Havcr2", "Ifitm1", "Ifitm2", "Gzmb", "Gzmd", "Gzme", "Gzmg", "Klrg1", "Serpinb6a", "Serpinb9", "Il10", "Prf1", "Cxcr3", "Ccl5", "Foxo1", "Ncr1", "Sell", "Klra3", "Klra5", "Klra8", "Klra9"), return.seurat = T,group.by = c("annotation","orig.ident"))
+```
+
+
+
+```{r}
+NK_pal <- gg_color_hue(5)
+avg_NK$sample <- rep(c("Control","ZBTB46"),5)
+names(NK_pal) <- unique(unname(avg_NK$annotation))
+col = list(
+  Cell_type = NK_pal,
+  Sample = c("Control"="black", "ZBTB46" = "red")
+)
+ha <- HeatmapAnnotation(
+   Cell_type = unname(avg_NK$annotation), Sample = unname(avg_NK$sample),
+  col = col
+)
+mat <-  GetAssayData(avg_NK,layer = "scale.data")
+Heatmap(mat,name = "NK cells",top_annotation = ha,cluster_rows = T,row_names_gp = grid::gpar(fontsize = 5),cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+```
+
+
+```{r}
+pdf(paste0(outdir,"Fig2D-2_NK_picked_marker_Heatmap.pdf"))
+Heatmap(mat,name = "NK cells",top_annotation = ha,cluster_rows = T,row_names_gp = grid::gpar(fontsize = 5),cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+dev.off()
+```
+
+
+```{r}
+NK_markers <- read.table(file = "within_cell_type_DE/NK_annotation_markers.tsv",sep = "\t",header = T)
+```
+
+
+
+```{r}
+NK_markers_selected <- NK_markers %>% group_by(cluster) %>% filter(p_val_adj < 0.05 & abs(avg_log2FC) > 1 & pct.2 < 0.8 & pct.1 > 0.1 ) %>% arrange(-abs(avg_log2FC)) %>% filter(!(grepl("^Gm",gene) | (grepl("*Rik$",gene)))) %>% slice_max(order_by = abs(avg_log2FC),n=25)
+```
+
+
+```{r}
+avg_NK <- AggregateExpression(NK, assays = "RNA",features = unique(c(NK_markers_selected$gene,"Entpd1", "Lag3", "Ctla4", "Icos", "Cd200", "Hspd1", "Klrc1", "Klrc2", "Cd44", "Havcr2", "Ifitm2", "Gzmb", "Klrg1", "Serpinb6a", "Serpinb9", "Cxcr3", "Ccl5", "Foxo1", "Ncr1", "Sell", "Klra3", "Klra5", "Klra9")), return.seurat = T,group.by = c("annotation","orig.ident"))
+```
+
+
+```{r}
+avg_NK$sample <- rep(c("Control","ZBTB46"),5)
+NK_pal <- gg_color_hue(5)
+names(NK_pal) <- unique(unname(avg_NK$annotation))
+col = list(
+  Cell_type = NK_pal,
+  Sample = c("Control"="black", "ZBTB46" = "red")
+)
+ha <- HeatmapAnnotation(
+   Cell_type = unname(avg_NK$annotation), Sample = unname(avg_NK$sample),
+  col = col
+)
+mat <-  GetAssayData(avg_NK,layer = "scale.data")
+Heatmap(mat,name = "NK cells",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",row_names_gp = grid::gpar(fontsize = 2.5),col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+```
+
+
+```{r}
+pdf(paste0(outdir,"Fig2D-2_NK_marker_from_seurat_Heatmap.pdf"))
+Heatmap(mat,name = "NK cells",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",row_names_gp = grid::gpar(fontsize = 2),col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+dev.off()
+```
+
+
+```{r}
+avg_NK <- AggregateExpression(NK, assays = "RNA",features = unique(c(NK_markers_selected$gene,"Havcr2","Isg15","Junb","Cebpb","Ccl3","Ccl5","Cd69","Gzma","Gzmb","Ncr1","Mki67","Tigit","Tox","Ccr7","Tcf7","Lef1","Tbx21","Tyrobp","Klrb1c","Ctla4","Lag3","Eomes","Ifng","Xcl1","Cd7","Il2ra","Il7r","Sell","Entpd1", "Lag3", "Ctla4", "Icos", "Cd200", "Hspd1", "Klrc1", "Klrc2", "Cd44", "Havcr2", "Ifitm1", "Ifitm2", "Gzmb", "Gzmd", "Gzme", "Gzmg", "Klrg1", "Serpinb6a", "Serpinb9", "Il10", "Prf1", "Cxcr3", "Ccl5", "Foxo1", "Ncr1", "Sell", "Klra3", "Klra5", "Klra8", "Klra9")), return.seurat = T,group.by = c("annotation","orig.ident"))
+```
+
+```{r}
+avg_NK$sample <- rep(c("Control","ZBTB46"),5)
+NK_pal <- gg_color_hue(5)
+names(NK_pal) <- unique(unname(avg_NK$annotation))
+col = list(
+  Cell_type = NK_pal,
+  Sample = c("Control"="black", "ZBTB46" = "red")
+)
+ha <- HeatmapAnnotation(
+   Cell_type = unname(avg_NK$annotation), Sample = unname(avg_NK$sample),
+  col = col
+)
+mat <-  GetAssayData(avg_NK,layer = "scale.data")
+Heatmap(mat,name = "lymphoid cells",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",row_names_gp = grid::gpar(fontsize = 2.5),col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+```
+```{r}
+pdf(paste0(outdir,"Fig2D-2_NK_marker_combined_Heatmap.pdf"))
+Heatmap(mat,name = "NK cells",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",row_names_gp = grid::gpar(fontsize = 2),col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+dev.off()
+```
+
+```{r}
+ht <- Heatmap(mat,name = "NK cells",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",row_names_gp = grid::gpar(fontsize = 2),col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+
+ht <- draw(ht)
+clusterlist = row_order(ht)
+write.table(rownames(mat)[clusterlist],file = paste0(outdir,"NK_combined_gene_list_sorted.txt"),sep = "\t",row.names = F,col.names = F,quote = F)
+```
+
+
+```{r}
+save(lymphoid, file = paste0(indir,lymphoid_file))
+```
+
+### T cell VlnPlots
+
+```{r}
+table(T_cells$annotation)
+```
+
+#### CD8 T
+
+```{r}
+CD8 <- subset(T_cells,subset = (annotation == "CD8 Teff") | (annotation == "CD8 Tex") | (annotation == "CD8 Tnaive") | (annotation == "Proliferative CD8"))
+```
+
+```{r}
+table(CD8$annotation)
+```
+
+```{r}
+CD8@meta.data <- CD8@meta.data %>% mutate(
+  label = case_match(
+    annotation,
+    "CD8 Teff" ~ "CD8_s2",
+    "CD8 Tex" ~ "CD8_s3",
+    "CD8 Tnaive" ~ "CD8_s1",
+    "Proliferative CD8" ~ "CD8_s4"
+  ),
+  label_ref = case_match(
+    annotation,
+    "CD8 Teff" ~ "s2:CD8 Eff",
+    "CD8 Tex" ~ "s3:CD8 Ex",
+    "CD8 Tnaive" ~ "s1:CD8 Naive",
+    "Proliferative CD8" ~ "s4:CD8 Prolif"
+  )
+)
+
+```
+
+```{r}
+table(CD8$label)
+```
+
+```{r}
+g <- VlnPlot(CD8,features = c("Havcr2","Lag3","Pdcd1","Ifng","Prf1","Gzmb","Cd7","Mki67","Sell"),group.by = "label")
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_CD8T_markers.pdf"), plot = g, units = "cm",height = 28,width = 28)
+```
+
+```{r}
+g <- VlnPlot(CD8,features = c("Havcr2","Lag3","Pdcd1","Ifng","Prf1","Gzmb","Cd7","Mki67","Sell"),group.by = "label_ref")
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_CD8T_markers_ref.pdf"), plot = g, units = "cm",height = 28,width = 28)
+```
+
+```{r}
+g <- VlnPlot(CD8, features = c("Trim30d","Icos"),group.by = "label")
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_CD8_Trim30d_Icos.pdf"), plot = g, units = "cm",height = 9,width = 18)
+```
+
+```{r}
+g <- VlnPlot(CD8, features = c("Cd44","Ifih1", "Parp12", "Isg15", "Rsad2", "Ifit2", "Herc6"),group.by = "label")
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_CD8_April_1.pdf"), plot = g, units = "cm",height = 28,width = 28)
+```
+
+
+```{r}
+T_s3_markers <- T_markers %>% filter(cluster == "CD8 Tex" & pct.1 > 0.2) %>% slice_max(order_by = avg_log2FC,n= 25)
+
+g <- VlnPlot(CD8, features = T_s3_markers$gene,group.by = "label",ncol = 5)
+ggsave(filename = paste0(outdir,"Vln_CD8s3_DE_up_20pct.pdf"), plot = g, units = "cm",height = 35,width = 35)
+```
+
+```{r}
+T_s3_markers <- T_markers %>% filter(cluster == "CD8 Tex" & pct.1 < 0.2 & pct.2 > 0.2) %>% slice_max(order_by = -(avg_log2FC),n=25)
+g <- VlnPlot(CD8, features = T_s3_markers$gene,group.by = "label",ncol = 5)
+ggsave(filename = paste0(outdir,"Vln_CD8s3_DE_down_20pct.pdf"), plot = g, units = "cm",height = 35,width = 35)
+```
+
+
+
+##### CD8 T split
+
+```{r}
+g <- VlnPlot(CD8, features = c("Cxcr3","Serpinb9"),split.by = "orig.ident",group.by = "label")
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_CD8_split.pdf"), plot = g, units = "cm",height = 9,width = 18)
+```
+
+
+#### T_act
+
+```{r}
+T_act <- subset(T_cells, subset = (annotation == "Ifn-responsive T"))
+```
+
+```{r}
+g <- VlnPlot(T_act, features = c("Cd40lg","Pdcd1","Lag3","Ifng"),group.by = "orig.ident")
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_Tact_split.pdf"), plot = g, units = "cm",height = 28,width = 28)
+```
+
+
+#### CD4 T
+
+```{r}
+CD4 <- subset(T_cells, subset = (annotation == "CD4 T"))
+```
+
+```{r}
+g <- VlnPlot(CD4, features = c("Lef1", "Cxcr3", "Foxp3", "Il2ra", "Sell", "Klrg1", "Gzmb", "Ctla4","Tnfrsf4"),group.by = "orig.ident")
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_CD4T_split.pdf"), plot = g, units = "cm",height = 28,width = 28)
+```
+
+
+### NK VlnPlots
+
+```{r}
+g <- VlnPlot(NK,features = c("Tbx21", "Lef1", "Ccl3", "Ccl5", "Klrg1", "Klrc2", "Cd69", "Isg15","Mki67"),group.by = "annotation")
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_NK_markers.pdf"), plot = g, units = "cm",height = 28,width = 28)
+```
+
+```{r}
+g <- VlnPlot(NK,features = c("Xcl1", "Ccl3", "Ccl4","Ccl5"),group.by = "annotation")
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_NK_markers_supp.pdf"), plot = g, units = "cm",height = 21,width = 28)
+```
+
+
+```{r}
+VlnPlot(NK,features = c("Klrg1"),group.by = "annotation",split.by = "orig.ident",pt.size = 0)
+VlnPlot(NK,features = c("Klrg1"),group.by = "annotation",split.by = "orig.ident")
+```
+
+
+```{r for looping}
+genes <- c("Xcr1","H2-Ab1","Itgax","Itgam","Itgae","Adgre1")
+for (i in genes){
+  g <- FeaturePlot(mono_mac,reduction = "tsne",cols = c("lightgrey","red"),order = T, features = i,label = F,pt.size = 0.5,label.color = "black",alpha = 1,split.by = "orig.ident" ) 
+  ggsave(filename = paste0(outdir,paste0("Mono_mac_TSNE_by_condition_",i,"_split.pdf")), plot = g, height = 5,width = 14)
+}
+```
+
+```{r}
+
+```
+
+
+# Fig 3 Mono/Mac
+
+```{r}
+load(paste0(indir,myeloid_file))
+```
+
+```{r}
+colnames(myeloid@meta.data)
+```
+
+```{r}
+table(myeloid$annotation_V2)
+```
+
+```{r}
+myeloid@meta.data <- myeloid@meta.data %>% 
+  mutate(annotation_V2 = case_match(
+    annotation_V2,
+    "cDC1" ~ "cDC",
+    "cDC2" ~ "cDC",
+    "cDC2_like" ~ "cDC",
+    .default = annotation_V2
+  )
+  )
+```
+
+```{r}
+save(myeloid,file = paste0(indir,myeloid_file))
+```
+
+```{r}
+table(myeloid$annotation_V2)
+table(myeloid$celltype)
+```
+
+
+```{r}
+DimPlot(myeloid,reduction = "tsne",group.by = "RNA_snn_res.0.7")
+```
+
+
+
+```{r}
+myeloid@meta.data  <- myeloid@meta.data %>% mutate(
+  annotation_V2 = case_match(
+    annotation,
+    "Mono/mac_1: M1-like 1" ~ "Mono/Mac_1",
+    "Mono/mac_2: Mertk- Ccr2+ M1-like" ~ "Mono/Mac_1",
+    "Mono/mac_3: Mertk+ Ccr2- Arg- M2-like" ~ "Mono/Mac_2",
+    "Mono/Mac_4: Arg1+ Ifitm1+" ~ "Mono/Mac_3",
+    "Mono/Mac_5: Mertk+ Ccr2- Arg1+ M2-like" ~ "Mono/Mac_4",
+    "Mono/Mac_6: Rsad2 high M1-like" ~ "Mono/Mac_5",
+    "Mono/Mac_7: M1-like 2" ~ "Mono/Mac_1",
+    "Mono/Mac_8: Mertk - Ccr2+ Mrc1- Il1r2- M2-like" ~ "Mono/Mac_1",
+    "Mono/Mac_9: Mertk+ Ccr2+ M2-like" ~ "Mono/Mac_1",
+    .default = annotation)
+)
+```
+
+```{r}
+table(myeloid$annotation_V2)
+```
+
+
+
+
+## Fig 3A TSNE of mono/mac
+
+```{r}
+myeloid_pal <- gg_color_hue(4)
+celltype_pal_mono <- gg_color_hue(6)
+```
+
+
+
+```{r}
+pdf("Fig3Aa_myeloid_overview.pdf")
+DimPlot(myeloid,reduction = "tsne",group.by = "celltype")+ theme(plot.title = element_blank())
+dev.off()
+pdf("Fig3Ab_myeloid_overview_mono_mac.pdf")
+DimPlot(myeloid,reduction = "tsne", cells.highlight = rownames(myeloid@meta.data)[myeloid$celltype == "Mono/Mac"],sizes.highlight = 0.1) +scale_color_manual(name = "", labels = c("Other", "Mono/Mac"),values = c("grey", myeloid_pal[3]))
+dev.off()
+pdf("Fig3Ac_myeloid_overview_DC.pdf")
+DimPlot(myeloid,reduction = "tsne", cells.highlight = rownames(myeloid@meta.data)[myeloid$celltype == "DC"],sizes.highlight = 0.1) +scale_color_manual(name = "", labels = c("Other", "DC"),values = c("grey", myeloid_pal[1]))
+dev.off()
+pdf("Fig3Ad_myeloid_overview_Neu.pdf")
+DimPlot(myeloid,reduction = "tsne", cells.highlight = rownames(myeloid@meta.data)[myeloid$celltype == "Neutrophil"],sizes.highlight = 0.1) +scale_color_manual(name = "", labels = c("Other", "Neutrophil"),values = c("grey", myeloid_pal[4]))
+dev.off()
+```
+
+```{r}
+mono_mac <- subset(myeloid,subset = celltype == "Mono/Mac")
+```
+
+### Cx3cr1 and Nos2 plot
+
+#### separate plots
+
+```{r}
+
+p1 <- FeaturePlot(mono_mac,reduction = "tsne",cols = c("beige","red2"),order = T, features = "Cx3cr1",label = F,label.size = 2.5,pt.size = 0.5,label.color = "black",alpha = 2 ,split.by = "orig.ident") 
+# +scale_colour_gradientn(colors = c("beige", "red", "darkred"))
+#+ scale_colour_gradientn(colors = c("lightgrey", "red", "purple"))
+#+ scale_colour_gradientn(colors = c("lightgrey", "red", "purple"))
+p2 <- FeaturePlot(mono_mac,reduction = "tsne",cols = c("beige","red2"),order = T, features = "Nos2",label = F,label.size = 2.5,pt.size = 0.5,alpha = 2,label.color = "black",split.by = "orig.ident") 
+# +scale_colour_gradientn(colors = c("beige", "red", "darkred"))
+#+ scale_colour_gradientn(colors = c("lightgrey", "red", "purple"))
+g <- grid.arrange(grobs = list(p1,p2),nrow = 2)
+ggsave(filename = paste0(outdir,"Fig3A_mono_mac_TSNE_by_condition_Cx3cr1_enhanced.pdf"), plot = p1, units = "cm",height = 8,width = 14)
+ggsave(filename = paste0(outdir,"Fig3A_mono_mac_TSNE_by_condition_Nos2_enhanced.pdf"), plot = p2, units = "cm",height = 8,width = 14)
+```
+
+#### Co-expression plot V1
+Update: show Cx3cr1 and Nos2 in one plot 
+```{r}
+FeaturePlot(mono_mac,reduction = "tsne",cols = c("beige","red2","darkblue"),blend = T,order = T, features = c("Cx3cr1","Nos2"),label = F,label.size = 2.5,pt.size = 0.5,label.color = "black",alpha = 1,blend.threshold = 0.1 ,split.by = "orig.ident") 
+```
+
+```{r}
+g <- FeaturePlot(mono_mac,reduction = "tsne",cols = c("beige","red2","darkblue"),blend = T,order = T, features = c("Cx3cr1","Nos2"),label = F,label.size = 2.5,pt.size = 1,label.color = "black",alpha = 1,blend.threshold = 0.2 ,split.by = "orig.ident") 
+ggsave(filename = paste0(outdir,"mono_mac_Cx3cr1_Nos2_combined_featureplot.pdf"),plot = g, height = 14,width = 20)
+```
+
+#### Co-expression plot using boolean
+
+```{r}
+Cx3cr1_Nos2 <- as.data.frame(t(as.matrix(GetAssayData(mono_mac,layer = "data")[c("Nos2","Cx3cr1"),]))) %>%
+  mutate(Cx3cr1_Nos2 = case_when(
+    (Nos2 > 0) & (Cx3cr1 <=0) ~ "Nos2+",
+    (Nos2 <= 0) & (Cx3cr1 > 0) ~ "Cx3cr1+",
+    (Nos2 > 0) & (Cx3cr1 > 0) ~ "Nos2+ Cx3cr1+",
+    .default = "Cx3cr1- Nos2-"
+  )) %>% select(-Nos2,-Cx3cr1)
+```
+
+```{r}
+# generate labels based on Cx3cr1 and Nos2 expression levels
+# Cx3cr1+, Nos2+, Cx3cr1+ Nos2+, DN
+mono_mac$miQC.probability <- NULL
+mono_mac$pANN_0.25_0.09 <- NULL
+```
+
+```{r}
+mono_mac$Cx3cr1_Nos2 <- Cx3cr1_Nos2
+
+
+```
+
+```{r}
+DimPlot(mono_mac,label = T,group.by = "annotation_V2",reduction = "tsne")
+```
+
+```{r}
+DimPlot(mono_mac,reduction = "tsne",group.by = "Cx3cr1_Nos2",order = T,alpha = 0.6)+ 
+    scale_color_manual(values = c("Nos2+" = "darkblue","Cx3cr1+" = "red2","Cx3cr1- Nos2-"="lightgrey","Nos2+ Cx3cr1+" = "deeppink2"),na.value = "beige")
+```
+
+```{r}
+mono_mac$TSNE_1 <- mono_mac@reductions$tsne@cell.embeddings[,"tSNE_1"]
+mono_mac$TSNE_2 <- mono_mac@reductions$tsne@cell.embeddings[,"tSNE_2"]
+```
+
+```{r}
+centers <- mono_mac@meta.data %>% 
+  dplyr::group_by(annotation_V2) %>% 
+  dplyr::summarize(TSNE_1 = median(TSNE_1), TSNE_2 = median(TSNE_2)) 
+```
+
+```{r}
+DimPlot(mono_mac,reduction = "tsne",group.by = "Cx3cr1_Nos2",order = T,alpha = 0.6)+ 
+    scale_color_manual(values = c("Nos2+" = "darkblue","Cx3cr1+" = "red2","Cx3cr1- Nos2-"="lightgrey","Nos2+ Cx3cr1+" = "deeppink2"),na.value = "beige") + geom_label_repel(data = centers,aes(x = TSNE_1, y = TSNE_2, label=annotation_V2),size = 2, color = "black",fill = "lightgrey")
+#+ geom_text_repel(data = centers,aes(x = TSNE_1, y = TSNE_2, label=annotation_V2),size = 2, color = "black")
+```
+```{r}
+g <- DimPlot(mono_mac,reduction = "tsne",group.by = "Cx3cr1_Nos2",order = T,alpha = 0.6)+ 
+    scale_color_manual(values = c("Nos2+" = "darkblue","Cx3cr1+" = "red2","Cx3cr1- Nos2-"="lightgrey","Nos2+ Cx3cr1+" = "deeppink2"),na.value = "beige") + geom_label_repel(data = centers,aes(x = TSNE_1, y = TSNE_2, label=annotation_V2),size = 2, color = "black",fill = "lightgrey")
+ggsave(filename = paste0(outdir,"mono_mac_Cx3cr1_Nos2_combined_labeled.pdf"),plot = g, height = 5,width = 7)
+g <- DimPlot(mono_mac,reduction = "tsne",group.by = "Cx3cr1_Nos2",order = T,alpha = 0.6,split.by = "orig.ident")+ 
+    scale_color_manual(values = c("Nos2+" = "darkblue","Cx3cr1+" = "red2","Cx3cr1- Nos2-"="lightgrey","Nos2+ Cx3cr1+" = "deeppink2"),na.value = "beige") 
+ggsave(filename = paste0(outdir,"mono_mac_Cx3cr1_Nos2_combined_unlabeled.pdf"),plot = g, height = 5,width = 14)
+
+g <- DimPlot(mono_mac,label = T,group.by = "annotation_V2",reduction = "tsne",alpha = 0.1,label.size = 2,split.by = "orig.ident") + 
+    scale_color_manual(values = c("Mono/Mac_1" = "white","Mono/Mac_2" = "white","Mono/Mac_3"="white","Mono/Mac_4" = "white","Mono/Mac_5" = "white","Proliferating Mono/Mac" = "white"),na.value = "beige")
+ggsave(filename = paste0(outdir,"mono_mac_Cx3cr1_Nos2_label_only.pdf"),plot = g, height = 5,width = 14)
+```
+
+
+
+```{r}
+DimPlot(mono_mac,label = T,group.by = "annotation_V2",reduction = "tsne",alpha = 0.1,label.size = 2) + 
+    scale_color_manual(values = c("Mono/Mac_1" = "white","Mono/Mac_2" = "white","Mono/Mac_3"="white","Mono/Mac_4" = "white","Mono/Mac_5" = "white","Proliferating Mono/Mac" = "white"),na.value = "beige")
+#+geom_mark_ellipse(data = mono_mac@meta.data, aes(x = TSNE_1, y = TSNE_2, fill = annotation_V2))
+```
+
+```{r}
+p1 <- FeaturePlot(mono_mac,reduction = "tsne",cols = c("white","red3"),order = F, features = "Cx3cr1",label = F,pt.size = 0.5,label.color = "black",alpha = 0.5,split.by = "orig.ident" ) 
+
+p2 <- FeaturePlot(mono_mac,reduction = "tsne",cols = c("white","darkblue"),order = F, features = "Nos2",label = F,pt.size = 0.5,label.color = "black",alpha = 0.5,split.by = "orig.ident" ) 
+ggsave(filename = paste0(outdir,"Mono_mac_TSNE_by_condition_Cx3cr1_transparent_split.pdf"), plot = p1, height = 5,width = 14)
+ggsave(filename = paste0(outdir,"Mono_mac_TSNE_by_condition_Nos2_transparent_split.pdf"), plot = p2, height = 5,width = 14)
+```
+
+
+
+```{r}
+table(mono_mac$annotation_V2)
+```
+
+#### Trying...
+
+```{r}
+plot_data <- as.data.frame(cbind(mono_mac$orig.ident,mono_mac@reductions$tsne@cell.embeddings,as.data.frame(t(as.matrix(GetAssayData(mono_mac)[c("Cx3cr1","Nos2"),]))))) %>% rename(orig.ident = "mono_mac$orig.ident")
+
+```
+
+
+```{r}
+ggplot(plot_data,aes(x= tSNE_1,y = tSNE_2)) +
+  theme_classic()+
+  geom_point(aes(colour = Cx3cr1),alpha = 0.2)+ 
+  geom_point(aes(color = -Nos2),alpha = 0.2)+
+  facet_grid(~orig.ident) + scale_color_gradientn(colours= c("red","beige","darkblue") )
+```
+
+### More featureplots
+
+```{r}
+genes <- c("Xcr1","H2-Ab1","Itgax","Itgam","Itgae","Adgre1")
+for (i in genes){
+  g <- FeaturePlot(mono_mac,reduction = "tsne",cols = c("lightgrey","red"),order = T, features = i,label = F,pt.size = 0.5,label.color = "black",alpha = 1,split.by = "orig.ident" ) 
+  ggsave(filename = paste0(outdir,paste0("Mono_mac_TSNE_by_condition_",i,"_split.pdf")), plot = g, height = 5,width = 14)
+}
+```
+
+
+```{r}
+p1 <- FeaturePlot(subset(mono_mac, subset = orig.ident == "Control"),reduction = "tsne",features = "Xcr1",label = F,order = T,alpha = 1,label.color = "black",pt.size = 0.5,split.by = "orig.ident") + scale_colour_gradientn(colors = c("gray90", "red", "red1"))
+p2 <- FeaturePlot(subset(mono_mac, subset = orig.ident == "ZBTB46"),reduction = "tsne",features = "Xcr1",label = F,order = T,alpha = 1,label.color = "black",pt.size = 0.5,split.by = "orig.ident") + scale_colour_gradientn(colors = c("gray90", "red", "red1"))
+g <- gridExtra::grid.arrange(grobs = list(p1,p2),ncol=2)
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Mono_mac_TSNE_by_condition_Xcr1_split.pdf"), plot = g, height = 5,width = 14)
+```
+
+
+
+
+
+## Fig 3B annotation and split by condition
+
+```{r}
+
+```
+
+
+```{r}
+p1 <- DimPlot(mono_mac,reduction = "tsne",group.by = "annotation_V2")+ theme(plot.title = element_blank())
+
+
+p3 <- DimPlot(mono_mac,reduction = "tsne",group.by = "orig.ident",shuffle = T)+ theme(plot.title = element_blank())+scale_color_manual(name = "Sample", labels = c("control", "treatment"),values = c("black", "red"))
+
+g <- grid.arrange(grobs = list(p1,p3),nrow = 2)
+ggsave(filename = paste0(outdir,"Fig3Ba_lymphoid_TSNE_unsplit.pdf"), plot = g, units = "cm",height = 16,width = 18)
+
+p2 <- DimPlot(mono_mac,reduction = "tsne",group.by = "annotation_V2",split.by = "orig.ident")+ theme(plot.title = element_blank())
+p4 <- DimPlot(mono_mac,reduction = "tsne",group.by = "orig.ident",split.by = "orig.ident")+ theme(plot.title = element_blank())+scale_color_manual(name = "Sample", labels = c("control", "treatment"),values = c("black", "red"))
+
+g <- grid.arrange(grobs = list(p2,p4),nrow = 2)
+ggsave(filename = paste0(outdir,"Fig3Bb_lymphoid_TSNE_by_condition.pdf"), plot = g, units = "cm",height = 16,width = 24)
+```
+
+
+## Fig 3D Heatmap of key genes from mono/mac
+
+
+```{r}
+avg_mono_mac <- AggregateExpression(mono_mac, assays = "RNA",features = c("Adgre1", "Cd14", "Ccr2", "Mertk","Tnf", "Fpr2", "Isg15", "Nos2", "Rsad2", "Spp1", "Il7r", "Ifitm3", "Ifit1", "Ifit3", "Il1b", "Slc2a1","Tgfb", "Cd274", "Arg1", "Chil3", "Cx3cr1", "Mrc1","Trem2", "C1qa","Ccl2","Mki67"), return.seurat = T,group.by = c("annotation_V2","orig.ident"))
+
+```
+
+```{r}
+avg_mono_mac$sample <- rep(c("Control","ZBTB46"),6)
+names(celltype_pal_mono) <- unique(unname(avg_mono_mac$annotation_V2))
+col = list(
+  Cell_type = celltype_pal_mono,
+  Sample = c("Control"="black", "ZBTB46" = "red")
+)
+ha <- HeatmapAnnotation(
+   Cell_type = unname(avg_mono_mac$annotation_V2), Sample = unname(avg_mono_mac$sample),
+  col = col
+)
+mat <-  GetAssayData(avg_mono_mac,layer = "scale.data")
+Heatmap(mat,name = "Mono/Mac",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+```
+
+
+```{r}
+pdf(paste0(outdir,"Fig3D_mono_mac_marker_Heatmap.pdf"))
+Heatmap(mat,name = "mono_mac dataset",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+dev.off()
+```
+
+
+```{r}
+save(myeloid, file = paste0(indir,myeloid_file))
+```
+
+## VlnPlot
+
+### all clusters
+
+```{r}
+g <- VlnPlot(mono_mac,features = c("Cx3cr1", "Nos2", "Mrc1", "Arg1", "Trem2", "Mertk", "Chil3", "Ccr2", "Il1b"),alpha = 0.2,group.by = "annotation_V2")
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_Mac_markers.pdf"), plot = g, units = "cm",height = 30,width = 30)
+```
+
+```{r}
+table(mono_mac$annotation_V2)
+```
+```{r}
+g <- VlnPlot(mono_mac,features = c("Cx3cr1", "Nos2"),alpha = 0.2,group.by = "annotation_V2",split.by = "orig.ident")
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_Mac_Cx3cr1_Nos2_split.pdf"), plot = g, units = "cm",height = 12,width = 24)
+```
+
+```{r}
+g <- VlnPlot(mono_mac,features = c("Cx3cr1", "Nos2"),alpha = 0,group.by = "annotation_V2",split.by = "orig.ident")
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_Mac_Cx3cr1_Nos2_split_woDots.pdf"), plot = g, units = "cm",height = 12,width = 24)
+```
+
+```{r}
+g <- VlnPlot(mono_mac,features = c("Cx3cr1", "Nos2"),alpha = 0.2,group.by = "orig.ident")
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_Mac_Cx3cr1_Nos2_split.pdf"), plot = g, units = "cm",height = 12,width = 24)
+g <- VlnPlot(mono_mac,features = c("Cx3cr1", "Nos2"),alpha = 0,group.by = "orig.ident")
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_Mac_Cx3cr1_Nos2_split_woDots.pdf"), plot = g, units = "cm",height = 12,width = 24)
+```
+
+### Mac_2 and Mac_4 split by condition
+
+```{r}
+mac_2_4 <- subset(mono_mac,subset = (annotation_V2 == "Mono/Mac_2") | (annotation_V2 == "Mono/Mac_4"))
+```
+
+```{r}
+g <- VlnPlot(mac_2_4,features = c("Tnf", "Ccr2", "Il1b", "Chil3", "Nos2", "Cx3cr1","Trem2"),alpha = 0.2,group.by = "annotation_V2",split.by = "orig.ident")
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_Mac_2_4_split.pdf"), plot = g, units = "cm",height = 30,width = 30)
+```
+
+
+## Xcr1 feature plot
+
+```{r}
+g <- FeaturePlot(mono_mac,reduction = "tsne",features = "Xcr1",label = F,order = T,label.size = 2.5,alpha = 1,label.color = "black",pt.size = 1) +scale_colour_gradientn(colors = c("gray90", "red", "red1"))
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Xcr1_Mac_V2.pdf"), plot = g, units = "cm",height = 15,width = 15)
+```
+
+## Supp: myeloid violin plot
+
+```{r}
+table(myeloid$celltype)
+```
+
+```{r}
+g <- VlnPlot(myeloid, features = c("Xcr1"),group.by = "orig.ident",log = T)
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_myeloid_Xcr1.pdf"), plot = g, units = "cm",height = 12,width = 12)
+```
+```{r}
+table(mono_mac$annotation_V2)
+```
+
+```{r}
+g <- VlnPlot(mono_mac, features = c("Xcr1"),group.by = "orig.ident",log = T)
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_mon-mac_Xcr1.pdf"), plot = g, units = "cm",height = 12,width = 12)
+```
+
+# Fig 4 Neutrophils
+
+```{r}
+neutrophil <- subset(myeloid, subset = celltype == "Neutrophil")
+```
+
+
+```{r}
+DimPlot(neutrophil,reduction = "tsne",group.by = "annotation")
+```
+
+## Fig 4A 
+
+
+```{r}
+p1 <- DimPlot(neutrophil,reduction = "tsne",group.by = "annotation")+ theme(plot.title = element_blank())
+p3 <- DimPlot(neutrophil,reduction = "tsne",group.by = "orig.ident",shuffle = T)+ theme(plot.title = element_blank())+scale_color_manual(name = "Sample", labels = c("control", "treatment"),values = c("black", "red"))
+
+g <- grid.arrange(grobs = list(p1,p3),nrow = 2)
+ggsave(filename = paste0(outdir,"Fig4Aa_neutrophil_TSNE_unsplit.pdf"), plot = g, units = "cm",height = 16,width = 18)
+
+p2 <- DimPlot(neutrophil,reduction = "tsne",group.by = "annotation",split.by = "orig.ident")+ theme(plot.title = element_blank())
+p4 <- DimPlot(neutrophil,reduction = "tsne",group.by = "orig.ident",split.by = "orig.ident")+ theme(plot.title = element_blank())+scale_color_manual(name = "Sample", labels = c("control", "treatment"),values = c("black", "red"))
+
+g <- grid.arrange(grobs = list(p2,p4),nrow = 2)
+ggsave(filename = paste0(outdir,"Fig4Ab_neutrophil_TSNE_by_condition.pdf"), plot = g, units = "cm",height = 16,width = 24)
+```
+```{r}
+load("rds_V2/neutrophil_V2p4.Robj")
+```
+
+```{r}
+p1 <- DimPlot(neutrophil,reduction = "tsne",group.by = "annotation")+ theme(plot.title = element_blank())
+p3 <- DimPlot(neutrophil,reduction = "tsne",group.by = "orig.ident",shuffle = T)+ theme(plot.title = element_blank())+scale_color_manual(name = "Sample", labels = c("control", "treatment"),values = c("black", "red"))
+
+g <- grid.arrange(grobs = list(p1,p3),nrow = 2)
+ggsave(filename = paste0(outdir,"Fig4Aa_neutrophil_TSNE_unsplit_new.pdf"), plot = g, units = "cm",height = 16,width = 18)
+
+p2 <- DimPlot(neutrophil,reduction = "tsne",group.by = "annotation",split.by = "orig.ident")+ theme(plot.title = element_blank())
+p4 <- DimPlot(neutrophil,reduction = "tsne",group.by = "orig.ident",split.by = "orig.ident")+ theme(plot.title = element_blank())+scale_color_manual(name = "Sample", labels = c("control", "treatment"),values = c("black", "red"))
+
+g <- grid.arrange(grobs = list(p2,p4),nrow = 2)
+ggsave(filename = paste0(outdir,"Fig4Ab_neutrophil_TSNE_by_condition+new.pdf"), plot = g, units = "cm",height = 16,width = 24)
+```
+## Fig 4 C Heatmap
+
+
+```{r}
+avg_neu <- AggregateExpression(neutrophil, assays = "RNA",features = c("Tnf","Icam1","Il1b","Cd14","Cd274","Il4ra","Tifa","Nfkbiz","F3","Cxcr4", "Arrb1","Tsc22d4", "Tsc22d3","Mmp9", "S100a8","Vegfa", "Mpo", "Osm"), return.seurat = T,group.by = c("annotation","orig.ident"))
+neu_pal <- gg_color_hue(3)
+```
+
+```{r}
+avg_neu$sample <- rep(c("Control","ZBTB46"),3)
+names(neu_pal) <- unique(unname(avg_neu$annotation))
+col = list(
+  Cell_type = neu_pal,
+  Sample = c("Control"="black", "ZBTB46" = "red")
+)
+ha <- HeatmapAnnotation(
+   Cell_type = unname(avg_neu$annotation), Sample = unname(avg_neu$sample),
+  col = col
+)
+mat <-  GetAssayData(avg_neu,layer = "scale.data")
+Heatmap(mat,name = "Neutrophil",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+```
+
+```{r}
+pdf(paste0(outdir,"Fig4C_neutrophil_marker_Heatmap.pdf"))
+Heatmap(mat,name = "Neutrophil",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+dev.off()
+```
+
+## Fig 4 Supp: Neutrophil cond DE + GSEA
+
+```{r}
+de_clusters <- function(current_cluster) {
+  groups <- paste0(conditions,"_",current_cluster)
+  both_markers <- FindMarkers(neutrophil, ident.1=groups[2], ident.2=groups[1], test.use="MAST", min.pct=0.00, logfc.threshold = 0)
+  marker_genes <- row.names(both_markers)
+  mutate(both_markers, gene = marker_genes, cluster = current_cluster)
+
+}
+```
+
+
+```{r}
+neutrophil$group <- gsub(" ","_",paste0(neutrophil$orig.ident,"_",neutrophil$celltype))
+conditions <- unique(neutrophil$orig.ident)
+clusters <- "Neutrophil"
+plts <- list()
+padj_thres = 10e-2
+log2FC_thres = 1
+Idents(neutrophil) <- neutrophil$group
+for (i in clusters) {
+  output_file <- paste0(outdir,paste0('ZBTB46_vs_Control_', i, '.tsv'))
+  de_results_tbl <- lapply(i, de_clusters) 
+  de_results_tbl <- de_results_tbl %>% bind_rows() %>%
+			arrange(desc(abs(avg_log2FC))) %>%
+			mutate(threshold = case_when(
+			(p_val_adj < padj_thres) & (abs(avg_log2FC) > log2FC_thres) ~ "Pass",
+			.default = "Fail"
+			))
+  write.table(de_results_tbl, output_file,sep="\t",row.names=T)
+}
+```
+
+
+```{r}
+ggplot(neutrophil_hallmarks[["Neutrophil"]] %>% filter(padj < 0.05) %>% head(n= 20), aes(reorder(pathway, NES), NES)) +
+    geom_col(aes(fill= NES < 7.5)) +
+    coord_flip() +
+    labs(x="Hallmark Pathway", y="Normalized Enrichment Score",
+       title="Neutrophil Treatment v.s Ctrl") +
+    theme_minimal()
+```
+```{r}
+pdf(paste0(outdir,"Neutrophil_condition_GSEA_hallmark.pdf"))
+ggplot(neutrophil_hallmarks[["Neutrophil"]] %>% filter(padj < 0.05) %>% head(n= 20), aes(reorder(pathway, NES), NES)) +
+    geom_col(aes(fill= NES < 7.5)) +
+    coord_flip() +
+    labs(x="Hallmark Pathway", y="Normalized Enrichment Score",
+       title="Neutrophil Treatment v.s Ctrl") +
+    theme_minimal()
+dev.off()
+```
+
+```{r}
+DE <- neutrophil_cond_DE %>% arrange(desc(avg_log2FC)) %>% select(gene,avg_log2FC)
+ranks <- deframe(DE)
+plotEnrichment(fgsea_sets_Hallmark[["HALLMARK_INFLAMMATORY_RESPONSE"]],
+               ranks) + labs(title="HALLMARK_INFLAMMATORY_RESPONSE")
+```
+
+```{r}
+pdf(paste0(outdir,"GSEA_plot_Inflammatory_response_preview.pdf"))
+plotEnrichment(fgsea_sets_Hallmark[["HALLMARK_INFLAMMATORY_RESPONSE"]],
+               ranks) + labs(title="HALLMARK_INFLAMMATORY_RESPONSE")
+dev.off()
+```
+
+
+# Fig 5 DC
+
+
+```{r}
+DC <- subset(myeloid,subset = celltype == "DC")
+```
+
+```{r}
+table(DC$hashtag)
+table(DC$annotation)
+```
+
+## Fig 5 A TSNE
+
+```{r}
+p1 <- DimPlot(DC,reduction = "tsne",group.by = "annotation")+ theme(plot.title = element_blank())
+p3 <- DimPlot(DC,reduction = "tsne",group.by = "orig.ident",shuffle = T)+ theme(plot.title = element_blank())+scale_color_manual(name = "Sample", labels = c("control", "treatment"),values = c("black", "red"))
+
+g <- grid.arrange(grobs = list(p1,p3),nrow = 2)
+ggsave(filename = paste0(outdir,"Fig5Aa_DC_TSNE_unsplit.pdf"), plot = g, units = "cm",height = 16,width = 18)
+
+p2 <- DimPlot(DC,reduction = "tsne",group.by = "annotation",split.by = "orig.ident")+ theme(plot.title = element_blank())
+p4 <- DimPlot(DC,reduction = "tsne",group.by = "orig.ident",split.by = "orig.ident")+ theme(plot.title = element_blank())+scale_color_manual(name = "Sample", labels = c("control", "treatment"),values = c("black", "red"))
+
+g <- grid.arrange(grobs = list(p2,p4),nrow = 2)
+ggsave(filename = paste0(outdir,"Fig5Ab_DC_TSNE_by_condition.pdf"), plot = g, units = "cm",height = 16,width = 24)
+```
+
+```{r}
+library(harmony)
+DC <- FindVariableFeatures(object = DC, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(DC) <-  VariableFeatures(DC) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(DC))]
+VariableFeaturePlot(DC)
+DC <- ScaleData(object = DC, features = VariableFeatures(object = DC), vars.to.regress = c("nCount_RNA", "percent.mt"))
+DC <- RunPCA(object = DC,
+                features =  VariableFeatures(object = DC),
+                dims = 1:50)
+gc()
+ElbowPlot(DC,ndims = 50)
+DC <- RunHarmony(object = DC, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+DC <- RunUMAP(DC,dims = 1:20,reduction = "harmony")
+DC <- RunTSNE(DC,dims = 1:20,reduction = "harmony")
+
+DC <- FindNeighbors(DC, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1.0, 0.1))  {   
+  DC <- FindClusters(object = DC, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+p1 <- DimPlot(DC,reduction = "tsne",group.by = "annotation")+ theme(plot.title = element_blank())
+p3 <- DimPlot(DC,reduction = "tsne",group.by = "orig.ident",shuffle = T)+ theme(plot.title = element_blank())+scale_color_manual(name = "Sample", labels = c("control", "treatment"),values = c("black", "red"))
+
+g <- grid.arrange(grobs = list(p1,p3),nrow = 2)
+ggsave(filename = paste0(outdir,"Fig5Aa_DC_TSNE_unsplit_new.pdf"), plot = g, units = "cm",height = 16,width = 18)
+
+p2 <- DimPlot(DC,reduction = "tsne",group.by = "annotation",split.by = "orig.ident")+ theme(plot.title = element_blank())
+p4 <- DimPlot(DC,reduction = "tsne",group.by = "orig.ident",split.by = "orig.ident")+ theme(plot.title = element_blank())+scale_color_manual(name = "Sample", labels = c("control", "treatment"),values = c("black", "red"))
+
+g <- grid.arrange(grobs = list(p2,p4),nrow = 2)
+ggsave(filename = paste0(outdir,"Fig5Ab_DC_TSNE_by_condition_new.pdf"), plot = g, units = "cm",height = 16,width = 24)
+```
+## Fig 5 C Heatmap of selected genes
+
+
+```{r}
+DC_markers <- read.table("within_cell_type_DE/DC_annotation_markers.tsv",sep = "\t",header = T)
+```
+
+```{r}
+DC_gene_selected <- DC_markers %>% group_by(cluster) %>% filter(p_val_adj < 0.05 & abs(avg_log2FC) > 1 & pct.1 > 0.5 ) %>% arrange(-abs(avg_log2FC)) %>% filter(!(grepl("^Gm",gene))) %>% slice_max(order_by = abs(avg_log2FC),n=10)
+```
+
+```{r}
+DC_gene <- c(DC_gene_selected$gene,"Batf3","Zbtb46","Sirpa","H2-Ab1","Cd1a", "Cd1c","Cd1d1", "Cd8a", "Cd14", "Cd40", "Cd80", "Cd83", "Cd86", "Cd163", "Mrc1", "Cd207", "Cd209a", "Clec10a", "Notch2", "Cx3cr1", "Itgax", "Itgam", "Id2", "Klf4", "Irf4", "Irf7")
+```
+
+```{r}
+avg_DC <- AggregateExpression(DC, assays = "RNA",features = DC_gene, return.seurat = T,group.by = c("annotation","orig.ident"))
+DC_pal <- gg_color_hue(4)
+```
+
+```{r}
+avg_DC$sample <- rep(c("Control","ZBTB46"),4)
+names(DC_pal) <- unique(unname(avg_DC$annotation))
+col = list(
+  Cell_type = DC_pal,
+  Sample = c("Control"="black", "ZBTB46" = "red")
+)
+ha <- HeatmapAnnotation(
+   Cell_type = unname(avg_DC$annotation), Sample = unname(avg_DC$sample),
+  col = col
+)
+mat <-  GetAssayData(avg_DC,layer = "scale.data")
+Heatmap(mat,name = "DC",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",row_names_gp = grid::gpar(fontsize = 5),col = colorRamp2(c(-1.2,0,1.2),c("darkblue","white","red")))
+```
+
+```{r}
+pdf(paste0(outdir,"Fig5C_DC_marker_Heatmap.pdf"))
+Heatmap(mat,name = "DC",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",row_names_gp = grid::gpar(fontsize = 5),col = colorRamp2(c(-1.2,0,1.2),c("darkblue","white","red")))
+dev.off()
+```
+
+## supp: new DC prop
+
+```{r}
+DC_table <- DC@meta.data %>% group_by(orig.ident, annotation) %>% summarize(n_annotation = n()) %>% 
+  mutate(proportion = 100* n_annotation/sum(n_annotation), total_by_sample = sum(n_annotation)) 
+```
+
+```{r}
+write.table(DC_table,file = "DC_table_by_total_DC.tsv",sep = "\t",row.names = F,col.names = T,quote = F)
+```
+
+```{r}
+ggplot(DC_table)+
+  geom_bar(aes(x = annotation,y = proportion,fill = orig.ident),stat = "identity",position = "dodge")+
+  facet_grid(~annotation, scales = "free") +
+  ylab("% of total DC in sample")
+```
+```{r}
+g <- ggplot(DC_table)+
+  geom_bar(aes(x = annotation,y = proportion,fill = orig.ident),stat = "identity",position = "dodge")+
+  facet_grid(~annotation, scales = "free") +
+  ylab("% of total DC in sample")
+ggsave(filename = paste0(outdir,"preview_DC_new_prop_plot.pdf"),plot = g,units = "cm",height = 7,width = 14)
+```
+
+## Vln plots
+
+### markers
+
+
+```{r}
+g <- VlnPlot(DC,features = c("Cx3cr1", "Nos2", "Mrc1", "Arg1", "Trem2", "Mertk", "Chil3", "Ccr2", "Il1b"),alpha = 0.7,group.by = "annotation")
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_DC_markers.pdf"), plot = g, units = "cm",height = 30,width = 30)
+```
+
+### split
+
+```{r}
+g <- VlnPlot(DC,features = c("Cd40", "Cd80", "Cd83", "Cd86", "H2-Ab1", "H2-DMb2", "Ifitm3", "Cd8a"),alpha = 0.7,group.by = "annotation", split.by = "orig.ident")
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_DC_split.pdf"), plot = g, units = "cm",height = 30,width = 30)
+```
+
+
+## Fig 5 Supp Mast cells
+
+### marker feature plots
+
+```{r}
+# "Cd200r3","Tpsb2"
+FeaturePlot(myeloid,reduction = "tsne",features = "Cd200r3",label = F,order = F,label.size = 2.5,alpha = 1,label.color = "black",pt.size = 1) +scale_colour_gradientn(colors = c("beige", "red", "darkred"))
+FeaturePlot(myeloid,reduction = "tsne",features = "Tpsb2",label = F,order = F,label.size = 2.5,alpha = 1,label.color = "black",pt.size = 1) +scale_colour_gradientn(colors = c("beige", "red", "darkred"))
+
+p1 <- FeaturePlot(myeloid,reduction = "tsne",features = "Cd200r3",label = F,order = F,label.size = 2.5,alpha = 1,label.color = "black",pt.size = 1) +scale_colour_gradientn(colors = c("beige", "red", "darkred"))
+p2 <- FeaturePlot(myeloid,reduction = "tsne",features = "Tpsb2",label = F,order = F,label.size = 2.5,alpha = 1,label.color = "black",pt.size = 1) +scale_colour_gradientn(colors = c("beige", "red", "darkred"))
+g <- gridExtra::grid.arrange(grobs = list(p1,p2),nrow = 2)
+ggsave(filename = paste0(outdir,"Fig5_Supp_Mast_cell_marker_featureplot.pdf"),plot = g,units = "cm",width = 14,height = 25)
+```
+```{r}
+mast_cells <- subset(myeloid,subset = annotation == "Mast cell")
+```
+
+```{r}
+FeaturePlot(mast_cells,reduction = "tsne",features = "Cd200r3",label = F,order = F,label.size = 2.5,alpha = 1,label.color = "black",pt.size = 1) +scale_colour_gradientn(colors = c("beige", "red", "darkred"))
+```
+
+### DE of mast cells: trt v.s. ctrl
+
+```{r}
+de_clusters <- function(current_cluster) {
+  groups <- paste0(conditions,"_",current_cluster)
+  both_markers <- FindMarkers(mast_cells, ident.1=groups[2], ident.2=groups[1], test.use="MAST", min.pct=0.00, logfc.threshold = 0)
+  marker_genes <- row.names(both_markers)
+  mutate(both_markers, gene = marker_genes, cluster = current_cluster)
+
+}
+```
+
+
+```{r}
+mast_cells$group <- gsub(" ","_",paste0(mast_cells$orig.ident,"_",mast_cells$annotation))
+conditions <- unique(mast_cells$orig.ident)
+clusters <- "Mast_cell"
+plts <- list()
+padj_thres = 10e-2
+log2FC_thres = 1
+Idents(mast_cells) <- mast_cells$group
+for (i in clusters) {
+  output_file <- paste0(outdir,paste0('ZBTB46_vs_Control_', "Mast_cells", '.tsv'))
+  de_results_tbl <- lapply(i, de_clusters) 
+  de_results_tbl <- de_results_tbl %>% bind_rows() %>%
+			arrange(desc(abs(avg_log2FC))) %>%
+			mutate(threshold = case_when(
+			(p_val_adj < padj_thres) & (abs(avg_log2FC) > log2FC_thres) ~ "Pass",
+			.default = "Fail"
+			))
+  write.table(de_results_tbl, output_file,sep="\t",row.names=T)
+}
+```
+
+```{r}
+ggplot(de_results_tbl,aes(x = avg_log2FC,y = -log10(p_val_adj),color = threshold))+
+  geom_point()
+```
+
+
+
+
+## Fig 5 E
+
+```{r}
+p1 <- FeaturePlot(myeloid,reduction = "tsne",cols =  c("lightgrey", "red2"),features = "Itgax",label = F,label.size = 2.5,label.color = "black",pt.size = 0.7,order = T,split.by = "orig.ident") 
+#+ scale_colour_gradientn(colors = c("lightgrey", "red", "purple"))
+#+ scale_colour_gradientn(colors = c("lightgrey", "red", "purple"))
+p2 <- FeaturePlot(myeloid,reduction = "tsne",features = "Xcr1",label = F,cols =  c("lightgrey", "red2"),alpha = 1.5,label.size = 2.5,pt.size = 0.7,order = T,label.color = "black",split.by = "orig.ident") 
+#+ scale_colour_gradientn(colors = c("lightgrey", "red", "purple"))
+ggsave(filename = paste0(outdir,"Fig5E_myeloid_TSNE_by_condition_Itgax_grey.pdf"), plot = p1, units = "cm",height = 8,width = 14)
+ggsave(filename = paste0(outdir,"Fig5E_myeloid_TSNE_by_condition_Xcr1_grey.pdf"), plot = p2, units = "cm",height = 8,width = 14)
+```
+
+```{r}
+p1 <- FeaturePlot(mono_mac,reduction = "tsne",cols =  c("lightgrey", "red2"),features = "H2-Ab1",label = F,label.size = 2.5,label.color = "black",pt.size = 0.3,order = F,split.by = "orig.ident") 
+p2 <- FeaturePlot(mono_mac,reduction = "tsne",features = "H2-Ab1",label = F,cols =  c("lightgrey", "red2"),alpha = 1,label.size = 2.5,pt.size = 0.3,order = F,label.color = "black") 
+#+ scale_colour_gradientn(colors = c("lightgrey", "red", "purple"))
+ggsave(filename = paste0(outdir,"Mono-mac_TSNE_by_condition_H2-Ab1_grey.pdf"), plot = p1, units = "cm",height = 8,width = 14)
+ggsave(filename = paste0(outdir,"Mono-mac_TSNE_unsplit_H2-Ab1_grey.pdf"), plot = p2, units = "cm",height = 8,width = 14)
+```
+
+
+
+```{r}
+Idents(mono_mac) <- mono_mac$annotation_V2
+p1 <- FeaturePlot(mono_mac,reduction = "tsne",cols =  c("beige", "red2"),features = "Itgax",label = F,label.size = 2.5,label.color = "black",pt.size = 0.7,order = T,split.by = "orig.ident") 
+#+ scale_colour_gradientn(colors = c("lightgrey", "red", "purple"))
+#+ scale_colour_gradientn(colors = c("lightgrey", "red", "purple"))
+p2 <- FeaturePlot(mono_mac,reduction = "tsne",features = "Xcr1",label = F,cols =  c("beige", "red2"),alpha = 1.5,label.size = 2.5,label.color = "black",pt.size = 0.7,order = T,split.by = "orig.ident") 
+#+ scale_colour_gradientn(colors = c("lightgrey", "red", "purple"))
+g <- grid.arrange(grobs = list(p1,p2),nrow = 2)
+ggsave(filename = paste0(outdir,"Fig5E_mono_mac_TSNE_by_condition_Itgax_unlabeled.pdf"), plot = p1, units = "cm",height = 8,width = 14)
+ggsave(filename = paste0(outdir,"Fig5E_mono_mac_TSNE_by_condition_Xcr1_unlabeled.pdf"), plot = p2, units = "cm",height = 8,width = 14)
+```
+
+```{r}
+g <- VlnPlot(mono_mac,features = c("Itgax","Xcr1"),split.by = "orig.ident",group.by = "annotation_V2",split.plot = F,alpha = 0.3,flip = T,log = T)
+ggsave(filename = paste0(outdir,"Fig5E_mono_mac_VlnPlot_Itgax_Xcr1.pdf"), plot = g, units = "cm",height = 12,width = 16)
+```
+
+
+# Fig 6
+
+```{r}
+load(paste0(indir,stromal_file))
+```
+
+```{r}
+table(stromal$hashtag)
+table(stromal$annotation_V2)
+```
+
+```{r}
+DimPlot(stromal,reduction = "tsne",group.by = "RNA_snn_res.0.2",label = T)
+```
+
+```{r}
+stromal@meta.data <- stromal@meta.data %>% mutate(
+  annotation_V2 = case_match(
+    as.character(RNA_snn_res.0.2),
+    "0" ~ "iCAF-like 1",
+    "1" ~ "iCAF-like 2",
+    "2" ~ "iCAF-like 3",
+    "3" ~ "apCAF-like",
+    "4" ~ "EC",
+    "5" ~ "myCAF"
+  )
+)
+```
+
+```{r}
+stromal@meta.data <- stromal@meta.data %>% mutate(
+  label = case_match(
+    annotation_V2,
+    "iCAF-like 1" ~ "Strm_s2",
+    "iCAF-like 2" ~ "Strm_s3",
+    "iCAF-like 3" ~ "Strm_s4",
+    "apCAF-like" ~ "Strm_s5",
+    "EC" ~ "Strm_s1",
+    "myCAF" ~ "Strm_s6"
+  )
+)
+stromal@meta.data <- stromal@meta.data %>% mutate(
+  label_ref = case_match(
+    annotation_V2,
+    "iCAF-like 1" ~ "s2:iCAF-like 1",
+    "iCAF-like 2" ~ "s3:iCAF-like 2",
+    "iCAF-like 3" ~ "s4:iCAF-like 3",
+    "apCAF-like" ~ "s5:apCAF-like",
+    "EC" ~ "Strm_s1",
+    "myCAF" ~ "s6:myCAF"
+  )
+)
+```
+
+```{r}
+table(stromal$label)
+```
+
+## Fig 6 A
+
+```{r}
+p1 <- DimPlot(stromal,reduction = "tsne",group.by = "annotation_V2",split.by = "orig.ident")+ theme(plot.title = element_blank())
+p2 <- DimPlot(stromal,reduction = "tsne",group.by = "orig.ident",shuffle = T)+ theme(plot.title = element_blank())+scale_color_manual(name = "Sample", labels = c("control", "treatment"),values = c("black", "red"))
+p3 <- DimPlot(stromal,reduction = "tsne",group.by = "orig.ident",split.by = "orig.ident")+ theme(plot.title = element_blank())+scale_color_manual(name = "Sample", labels = c("control", "treatment"),values = c("black", "red"))
+g <- grid.arrange(grobs = list(p1,p2,p3),nrow = 2)
+ggsave(filename = paste0(outdir,"Fig6A_stromal_TSNE_by_condition.pdf"), plot = g, units = "cm",height = 16,width = 28)
+```
+
+```{r}
+fib_gene_list <- c("S100a4","Sparcl1","Vim","Sparcl1","Myh11","Mcam","Col5a2", "Aebp1", "Col1a1", "Col1a2", "Col3a1","Fap", "Mmp13", "Sfrp2","Rgs5","A2m", "Cpe", "Adamts1", "Acta2","Fabp7", "Vegfa", "Spp1", "Hilpda","S100a9", "S100a8", "Fcgr3", "G0s2","Nampt", "Rgs2", "Sod2","Il6","Has1","Clec3b","Islr","Ngfr","Tgfbr2","Cdh11","	
+Itgbl1","Actn1","Lgals1","Tnfaip6","Ccn3","Gas1","Olfml3","Tpm1","Rbp1","Fhit","Opcml","Zeb1","Saa3")
+
+```
+
+```{r}
+table(stromal$celltype)
+```
+
+
+
+```{r}
+CAF <- subset(stromal,subset = celltype == "CAF")
+```
+
+```{r}
+Idents(CAF) <- CAF$annotation_V2
+CAF_markers <- FindAllMarkers(CAF)
+write.table(CAF_markers,file = "within_cell_type_DE/CAF_annotation_markers_V2.tsv",sep = "\t",row.names = F)
+```
+
+```{r}
+CAF_gene_selected <- CAF_markers %>% group_by(cluster) %>% filter(p_val_adj < 0.05 & abs(avg_log2FC) > 1 & pct.1 > 0.5 ) %>% arrange(-abs(avg_log2FC)) %>% filter(!(grepl("^Gm",gene)) & cluster != "apCAF-like" & cluster != "myCAF") %>% slice_max(order_by = abs(avg_log2FC),n=20)
+```
+
+
+
+```{r}
+caf_avg <- AggregateExpression(CAF,assay = "RNA",features = fib_gene_list,return.seurat = T,group.by = c("annotation_V2","orig.ident"))
+```
+
+```{r}
+CAF_pal <- gg_color_hue(5)
+```
+
+
+```{r}
+caf_avg$sample <- rep(c("Control","ZBTB46"),5)
+names(CAF_pal) <- unique(unname(caf_avg$annotation_V2))
+col = list(
+  Cell_type = CAF_pal,
+  Sample = c("Control"="black", "ZBTB46" = "red")
+)
+ha <- HeatmapAnnotation(
+   Cell_type = unname(caf_avg$annotation_V2), Sample = unname(caf_avg$sample),
+  col = col
+)
+mat <-  GetAssayData(caf_avg,layer = "scale.data")
+Heatmap(mat,name = "CAF dataset",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",col = colorRamp2(c(-1.5,0,1.5),c("darkblue","white","red")))
+```
+```{r}
+pdf(paste0(outdir,"Fig6C_CAF_marker_Heatmap.pdf"))
+Heatmap(mat,name = "CAF dataset",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",col = colorRamp2(c(-1.5,0,1.5),c("darkblue","white","red")))
+dev.off()
+```
+
+
+## Fig 6 Supp featureplots
+
+
+```{r}
+Idents(stromal) <- stromal$annotation_V2
+plts <- lapply(c("S100a4","Sparcl1","Vim","Sparcl1","Myh11","Mcam","Col5a2", "Aebp1", "Col1a1", "Col1a2", "Col3a1","Fap", "Comp", "Mmp13", "Sfrp2","Rgs5","Igfbp7","A2m", "Cpe", "Adamts1", "Acta2","Fabp7", "Vegfa", "Spp1", "Igkc", "Iglc2", "Hilpda", "Ighg1", "Ighg3","S100a9", "S100a8", "Fcgr3", "G0s2","Nampt", "Rgs2", "Sod2"),function(x){
+  FeaturePlot(stromal,reduction = "tsne",features = x,label = T) +scale_colour_gradientn(colors = c("grey", "red", "purple"))
+})
+g <- grid.arrange(grobs = plts,nrow = 6)
+ggsave(filename = paste0(outdir,"Fig6_Supp_Stromal_FeaturePlot_pmarkers_labeled.pdf"), plot = g, units = "cm",height = 100,width = 100)
+
+plts <- lapply(c("S100a4","Sparcl1","Vim","Sparcl1","Myh11","Mcam","Col5a2", "Aebp1", "Col1a1", "Col1a2", "Col3a1","Fap", "Comp", "Mmp13", "Sfrp2","Rgs5","Igfbp7","A2m", "Cpe", "Adamts1", "Acta2","Fabp7", "Vegfa", "Spp1", "Igkc", "Iglc2", "Hilpda", "Ighg1", "Ighg3","S100a9", "S100a8", "Fcgr3", "G0s2","Nampt", "Rgs2", "Sod2"),function(x){
+  FeaturePlot(stromal,reduction = "tsne",features = x,label = F) +scale_colour_gradientn(colors = c("grey", "red", "purple"))
+})
+g <- grid.arrange(grobs = plts,nrow = 6)
+ggsave(filename = paste0(outdir,"Fig6_Supp_Stromal_FeaturePlot_pmarkers.pdf"), plot = g, units = "cm",height = 100,width = 100)
+```
+
+## Fig 6 stromal heatmap
+
+```{r}
+stromal_gene_list <- c("S100a4","Sparcl1","Vim","Sparcl1","Myh11","Mcam","Col5a2", "Aebp1", "Col1a1", "Col1a2", "Col3a1","Fap", "Mmp13", "Sfrp2","Rgs5","A2m", "Cpe", "Adamts1", "Acta2","Fabp7", "Vegfa", "Spp1", "Hilpda","S100a9", "S100a8", "Fcgr3", "G0s2","Nampt", "Rgs2", "Sod2","Il6","Has1","Clec3b","Islr","Ngfr","Tgfbr2","Cdh11","Itgbl1","Actn1","Lgals1","Tnfaip6","Ccn3","Gas1","Olfml3","Tpm1","Rbp1","Fhit","Opcml","Zeb1","Saa3","Myct1","Pecam1","Cyyr1","Kdr","Cdh5","H2-Ab1","Cd74","Cd80","Has1")
+```
+
+```{r}
+stromal_avg <- AggregateExpression(stromal,assay = "RNA",features = stromal_gene_list,return.seurat = T,group.by = c("annotation_V2","orig.ident"))
+```
+
+```{r}
+stromal_pal <- gg_color_hue(6)
+stromal_avg$sample <- rep(c("Control","ZBTB46"),6)
+names(stromal_pal) <- unique(unname(stromal_avg$annotation_V2))
+col = list(
+  Cell_type = stromal_pal,
+  Sample = c("Control"="black", "ZBTB46" = "red")
+)
+ha <- HeatmapAnnotation(
+   Cell_type = unname(stromal_avg$annotation_V2), Sample = unname(stromal_avg$sample),
+  col = col
+)
+mat <-  GetAssayData(stromal_avg,layer = "scale.data")
+Heatmap(mat,name = "stromal cells",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_gp = grid::gpar(fontsize = 5),row_names_side = "left",col = colorRamp2(c(-1.5,0,1.5),c("darkblue","white","red")))
+```
+```{r}
+pdf(paste0(outdir,"Fig6C_stromal_marker_Heatmap.pdf"))
+Heatmap(mat,name = "stromal cells",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_gp = grid::gpar(fontsize = 5),row_names_side = "left",col = colorRamp2(c(-1.5,0,1.5),c("darkblue","white","red")))
+dev.off()
+```
+## stromal supp: prep for proportion table
+
+```{r}
+table(stromal$hashtag)
+```
+
+
+```{r}
+stromal_table_base <- stromal@meta.data %>% group_by(annotation_V2,orig.ident,hashtag) %>%
+  summarise(n_by_condition = n()) 
+stromal_table_total <- stromal@meta.data %>% group_by(orig.ident) %>%
+  summarise(total_by_sample = n()) 
+
+```
+
+```{r}
+stromal_table <- full_join(stromal_table_base,stromal_table_total,by = c("orig.ident")) %>% mutate(proportion = n_by_condition*100/total_by_sample)
+```
+
+```{r}
+write.table(stromal_table,file = "stromal_annotation_V2_proportion_table.tsv",sep = "\t",row.names = F,col.names = T,quote = F)
+```
+
+```{r}
+stromal_table_base <- stromal@meta.data %>% 
+  filter(hashtag == "Reporter+" | hashtag == "Reporter-") %>% group_by(annotation_V2,orig.ident,hashtag)  %>%
+  summarise(n_by_condition = n()) 
+stromal_table_total <- stromal@meta.data %>% 
+  filter(hashtag == "Reporter+" | hashtag == "Reporter-") %>% group_by(orig.ident) %>%
+  summarise(total_by_sample = n())
+
+```
+
+```{r}
+stromal_table <- full_join(stromal_table_base,stromal_table_total,by = c("orig.ident")) %>% mutate(proportion = n_by_condition*100/total_by_sample)
+write.table(stromal_table,file = "stromal_annotation_V2_proportion_table_single_positive.tsv",sep = "\t",row.names = F,col.names = T,quote = F)
+```
+
+## Vln Plot
+
+```{r}
+Stm_12345 <- subset(stromal, subset = annotation_V2 != "EC")
+```
+
+```{r}
+VlnPlot(Stm_12345,features = c("Cd80","Olfml3"),group.by = "label",split.by = "orig.ident")
+```
+```{r}
+g <- VlnPlot(Stm_12345,features = c("Cd80","Olfml3"),group.by = "label",split.by = "orig.ident")
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_Strm_CAF_split.pdf"), plot = g, units = "cm",height = 10,width = 15)
+```
+
+```{r}
+g <- VlnPlot(Stm_12345,features = c("Cd80","Olfml3"),group.by = "label_ref",split.by = "orig.ident")
+ggsave(filename = paste0(outdir,"Focused plots_3-27-24/","Vln_Strm_CAF_split_ref.pdf"), plot = g, units = "cm",height = 10,width = 15)
+```
+
+
+```{r}
+save(stromal, file = paste0(indir,stromal_file))
+```
+
+

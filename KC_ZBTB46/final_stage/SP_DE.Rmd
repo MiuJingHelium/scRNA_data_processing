@@ -1,0 +1,53 @@
+---
+title: "Single Positive Hashtag DE"
+output: html_document
+date: "2024-03-25"
+---
+
+```{r}
+library(Seurat) # youb know why
+library(tidyverse) # base package for data organization and plotting
+library(RColorBrewer) # for making palettes
+library(gridExtra) # for arranging multiple plots
+library(data.table) # well...
+library(ComplexHeatmap)
+library(circlize)
+library(MAST)
+```
+
+```{r}
+load("rds_V2/mono_mac_V2p4_SP.Robj")
+```
+
+```{r}
+avg_exp <- AggregateExpression(mono_mac,return.seurat = T,group.by = c("annotation_V2","orig.ident","hashtag"))
+```
+```{r}
+head(GetAssayData(avg_exp,layer = "data"))
+```
+```{r}
+avg_exp$sample <- rep(c(rep("Control",2),rep("ZBTB46",2)),6)
+```
+
+```{r}
+data_table <- avg_exp@meta.data %>% select("annotation_V2","hashtag","sample") %>% cbind(t(GetAssayData(avg_exp,layer = "data")))
+```
+
+```{r}
+data_table <- data_table[!(grepl("^Gm",colnames(data_table)) | (grepl("*Rik$",colnames(data_table))))]
+```
+
+```{r}
+mat <- as.matrix(data_table[,4:ncol(data_table)])
+log2FC <- log2((mat[data_table$hashtag == "Reporter+",] + 1e-5)/(mat[data_table$hashtag == "Reporter-",] + 1e-5))
+       
+  
+  #data_table %>% group_by("annotation_V2") %>% app
+  #summarise(value = value[condition == "B"] / value[condition == "A"])
+
+```
+
+```{r}
+log2FC <- t(as.matrix(log2FC))
+```
+
