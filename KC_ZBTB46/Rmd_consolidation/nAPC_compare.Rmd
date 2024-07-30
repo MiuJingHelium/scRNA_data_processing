@@ -1,0 +1,175 @@
+---
+title: "nAPC comparison"
+output: html_document
+date: "2024-03-19"
+---
+
+
+```{r}
+library(fgsea)
+library(Seurat) # youb know why
+library(tidyverse) # base package for data organization and plotting
+library(RColorBrewer) # for making palettes
+library(gridExtra) # for arranging multiple plots
+library(data.table) # well...
+library(readxl)
+```
+
+# helper function
+
+```{r}
+fgsea_res <- function(cell_type_vector, DE_genes, choose_n = 100, choose_tops = F,gene_set = fgsea_sets_Hallmark,mode = "combined"){
+  fgsea_res <- list()
+  #DE_selected <- DE_genes %>% group_by(cluster) %>% filter(p_val_adj < 0.05 & abs(avg_log2FC) > 1 & pct.1 > 0.1) %>% mutate(metric = sign(avg_log2FC)*(-log10(p_val_adj))) %>% filter(!is.infinite(metric))
+  DE_selected <- DE_genes %>% mutate(metric = sign(avg_log2FC)*(-log10(p_val_adj))) %>% filter(!is.infinite(metric))
+  if (mode == "simple"){
+    DE_selected <- DE_genes %>% mutate(metric = avg_log2FC) %>% filter(!is.infinite(metric))
+  }
+  for (i in cell_type_vector) {
+    DE <- DE_selected[DE_selected$cluster == i,] %>% arrange(desc(metric)) %>% select(gene,metric)
+    if (choose_tops){
+      DE_top <- DE %>% slice_max(order_by = metric, n = choose_n)
+      DE_tail <- DE %>% slice_min(order_by = metric, n = choose_n)
+      DE <- rbind(DE_top,DE_tail)
+    }
+    DE <- DE %>% arrange(desc(metric))
+    rankings <- DE$metric
+    names(rankings) <- DE$gene
+    #print(rankings)
+    plot(rankings)
+    fgseaRes <- fgsea(gene_set, stats = rankings,nPermSimple = 1000000)
+    fgseaResTidy <- fgseaRes %>%
+      as_tibble() %>% filter(padj < 0.05 ) %>%
+      arrange(desc(NES))
+  fgsea_res[[i]] <- fgseaResTidy
+  fwrite(fgseaResTidy, file=paste0(i,"_fgsea.tsv"), sep="\t", sep2=c("", " ", ""))
+  }
+   return(fgsea_res)
+}
+```
+
+# load markers and prepare gene sets
+
+```{r}
+nAPC1_markers <- as.data.frame(read_excel("~/Desktop/WUSTL/ZBTB46_TME/nAPC_compare/41467_2021_24591_MOESM5_ESM.xlsx", sheet = "Data 1.4 DEGscRNAseq_nAPC1",skip = 3,col_names = T))
+
+nAPC2_markers <- as.data.frame(read_excel("~/Desktop/WUSTL/ZBTB46_TME/nAPC_compare/41467_2021_24591_MOESM5_ESM.xlsx", sheet = "Data 1.5 DEGscRNAseq_nAPC2",skip = 3,col_names = T))
+```
+
+```{r select genes for geneset}
+nAPC1_markers_up <- nAPC1_markers %>% filter(logFC > 0 & pct_out < 80) %>% slice_max(order_by = auc,n= 100)
+# nAPC1_markers_down <- nAPC1_markers %>% slice_max(order_by = auc,n= 100) %>% filter(logFC < 0)
+nAPC2_markers_up <- nAPC2_markers %>% filter(logFC > 0 & pct_out < 80) %>% slice_max(order_by = auc,n= 100)
+# nAPC2_markers_down <- nAPC2_markers %>% filter(logFC < 0) %>% slice_max(order_by = auc,n= 100)
+```
+
+```{r}
+GSE173569 <- list(nAPC1 = nAPC1_markers_up$feature, 
+                  nAPC2 = nAPC2_markers_up$feature
+                  )
+```
+
+# load neutrophil markers
+
+```{r}
+neutrophil_markers <- read.table(file = "within_cell_type_DE/Neutrophil_annotation_markers.tsv",sep = "\t",header = T)
+
+neutrophil_markers <- neutrophil_markers %>% filter( p_val_adj < 0.05 & pct.2 < 0.8)
+```
+
+# perform gsea of Neu_2 over GSE173569
+
+```{r}
+N2_res <- fgsea_res(unique(neutrophil_markers$cluster),neutrophil_markers,gene_set = GSE173569,mode = "simple",choose_tops = F)
+```
+
+```{r}
+gs_vector <- names(GSE173569)
+celltype_vector <- as.character(unique(neutrophil_markers$cluster))
+table_res_neu <- data.frame(pathway = gs_vector)
+for (i in celltype_vector){
+  table_tmp <- N2_res[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% gs_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_neu <- full_join(table_res_neu,table_celltype,by = "pathway")
+}
+```
+
+```{r}
+table_res_neu[is.na(table_res_neu)] = 0
+table_res_neu <- table_res_neu[apply(table_res_neu[,2:4],1,var) != 0,]
+```
+
+```{r}
+write.table(table_res_neu,file = "fgsea_Neutrophils_GSE173569k_consolidated_filtered.tsv",sep = "\t",row.names = F,quote = F)
+```
+
+
+
+```{r}
+DE  <- neutrophil_markers %>% filter(p_val_adj < 0.05 & pct.2 < 0.8 & cluster == "Neutrophil_1")  %>% mutate(metric = avg_log2FC) %>% filter(!is.infinite(metric))
+DE <- DE %>% arrange(desc(metric)) %>% select(gene,metric)
+rankings <- DE$metric
+names(rankings) <- DE$gene
+plotEnrichment(GSE173569[["nAPC1"]],
+               rankings) + labs(title="Neutrophil 1 GSE173569_nAPC1")
+
+pdf(file = paste0("nAPC_compare/nAPC1_GSEA_Neu1.pdf"))
+plotEnrichment(GSE173569[["nAPC1"]],
+               rankings) + labs(title="Neutrophil_1 GSE173569_nAPC1")
+dev.off()
+
+plotEnrichment(GSE173569[["nAPC2"]],
+               rankings) + labs(title="Neutrophil_1 GSE173569_nAPC2")
+
+pdf(file = paste0("nAPC_compare/nAPC2_GSEA_Neu1.pdf"))
+plotEnrichment(GSE173569[["nAPC2"]],
+               rankings) + labs(title="Neutrophil_1 GSE173569_nAPC2")
+dev.off()
+```
+
+```{r}
+DE  <- neutrophil_markers %>% filter(p_val_adj < 0.05 & pct.2 < 0.8 & cluster == "Neutrophil_2")  %>% mutate(metric = avg_log2FC) %>% filter(!is.infinite(metric))
+DE <- DE %>% arrange(desc(metric)) %>% select(gene,metric)
+rankings <- DE$metric
+names(rankings) <- DE$gene
+plotEnrichment(GSE173569[["nAPC1"]],
+               rankings) + labs(title="Neutrophil_2 GSE173569_nAPC1")
+
+pdf(file = paste0("nAPC_compare/nAPC1_GSEA_Neu2.pdf"))
+plotEnrichment(GSE173569[["nAPC1"]],
+               rankings) + labs(title="Neutrophil_2 GSE173569_nAPC1")
+dev.off()
+
+plotEnrichment(GSE173569[["nAPC2"]],
+               rankings) + labs(title="Neutrophil_2 GSE173569_nAPC2")
+
+pdf(file = paste0("nAPC_compare/nAPC2_GSEA_Neu2.pdf"))
+plotEnrichment(GSE173569[["nAPC2"]],
+               rankings) + labs(title="Neutrophil_2 GSE173569_nAPC2")
+dev.off()
+```
+
+
+```{r}
+DE  <- neutrophil_markers %>% filter(p_val_adj < 0.05 & pct.2 < 0.8 & cluster == "Neutrophil_3")  %>% mutate(metric = avg_log2FC) %>% filter(!is.infinite(metric))
+DE <- DE %>% arrange(desc(metric)) %>% select(gene,metric)
+rankings <- DE$metric
+names(rankings) <- DE$gene
+plotEnrichment(GSE173569[["nAPC1"]],
+               rankings) + labs(title="Neutrophil_3 GSE173569_nAPC1")
+
+pdf(file = paste0("nAPC_compare/nAPC1_GSEA_Neu3.pdf"))
+plotEnrichment(GSE173569[["nAPC1"]],
+               rankings) + labs(title="Neutrophil_3 GSE173569_nAPC1")
+dev.off()
+
+plotEnrichment(GSE173569[["nAPC2"]],
+               rankings) + labs(title="Neutrophil_3 GSE173569_nAPC2")
+
+pdf(file = paste0("nAPC_compare/nAPC2_GSEA_Neu3.pdf"))
+plotEnrichment(GSE173569[["nAPC2"]],
+               rankings) + labs(title="Neutrophil_3 GSE173569_nAPC2")
+dev.off()
+```
+
