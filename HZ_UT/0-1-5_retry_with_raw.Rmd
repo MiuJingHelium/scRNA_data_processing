@@ -1,0 +1,292 @@
+---
+title: "0-1-5_retry_with_raw"
+output: html_document
+date: "2024-10-07"
+---
+
+```{r}
+# define packages
+library(Seurat)
+library(tidyverse)
+library(harmony)
+library(SoupX)
+library(miQC)
+library(SeuratWrappers) # for miQC
+library(DoubletFinder)
+library(scuttle)
+```
+
+```{r}
+library(RColorBrewer)
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+```
+
+```{r}
+indir <- "align_outs/"
+outdir <- "RDS/"
+if (!dir.exists(outdir)) dir.create(outdir)
+
+```
+
+```{r}
+source("DoubletFinder_helper.R")
+```
+
+## load files
+
+```{r}
+samples <- list.files(indir)
+```
+
+
+```{r}
+seu_list <- lapply(samples, function(x){
+  toc <- Seurat::Read10X(paste0(indir,x,"/filtered_feature_bc_matrix/"))
+  tod <- Seurat::Read10X(paste0(indir,x,"/raw_feature_bc_matrix/"))
+  meta <- data.table::fread(paste(indir, "/",x, "/analysis/clustering/gene_expression_graphclust/clusters.csv", sep = ""))
+  
+  clusters <- meta$Cluster
+  names(clusters) <- meta$Barcode
+
+  sc <- SoupChannel(tod, toc, calcSoupProfile = FALSE)
+  sc <- setClusters(sc, clusters)
+  sc <- estimateSoup(sc)
+  sc <- autoEstCont(sc,soupQuantile = 0.5,tfidfMin = 0.5)
+  out <- adjustCounts(sc)
+  
+  seu <- CreateSeuratObject(out)
+  
+  seu$orig.ident <- x
+  seu
+})
+names(seu_list) <- samples # name the elements by the sample name
+```
+
+
+```{r}
+colnames(seu_list[[1]]@meta.data)
+table(seu_list[[1]]$orig.ident)
+table(seu_list[[2]]$orig.ident)
+table(seu_list[[3]]$orig.ident)
+table(seu_list[[4]]$orig.ident)
+```
+## add additional meta and metrics
+
+```{r}
+seu_list <- lapply(seu_list, function(x){
+  x[["percent.mt"]] <- PercentageFeatureSet(object = x, pattern = "^mt|^Mt")
+  x$percent.ribo <- PercentageFeatureSet(x,pattern="^Rp[ls]")
+  x$log10_nCount_RNA <- log10(x$nCount_RNA+1) # add a pseudcount offset to prevent log10(0)
+  x$log10_nFeature_RNA <- log10(x$nFeature_RNA+1)
+  x
+})
+```
+
+### QC
+
+### mito 
+
+```{r}
+
+seu_list <- lapply(seu_list, function(x){
+  x[["high_mito"]] <- isOutlier(x$percent.mt, type="higher", min.diff=0.5)
+  x@meta.data <- x@meta.data %>% mutate(
+  mitoQC = case_when(
+    high_mito ~ "remove",
+    .default = "keep"
+  )
+  )
+    
+  x <- RunMiQC(x, percent.mt = "percent.mt", nFeature_RNA = "nFeature_RNA", posterior.cutoff = 0.75,
+               model.slot = "flexmix_model")
+  x
+})
+
+```
+```{r}
+colnames(seu_list$PS19_Oil@meta.data)
+```
+
+### doubletFinder
+
+
+```{r}
+seu_list <- lapply(seu_list, function(x){
+  x <- NormalizeData(object = x,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+  x <- FindVariableFeatures(object = x, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+
+  x <- ScaleData(object = x, assay = "RNA", features = VariableFeatures(object = x), vars.to.regress = c("nCount_RNA"))
+  x <- RunPCA(x,features =  VariableFeatures(object = x),assay = "RNA")
+  x <- RunUMAP(x, dims = 1:20)
+  x <- FindNeighbors(object =x, dims = 1:20)              
+  x <- FindClusters(object = x, resolution = 0.1)
+ sweep.res.list <- paramSweep(x, PCs = 1:20, sct = FALSE)
+  sweep.stats <- summarizeSweep(sweep.res.list, GT = FALSE)
+  bcmvn <- find.pK(sweep.stats)
+
+
+  homotypic.prop <- modelHomotypic(x@meta.data$seurat_clusters)          
+  nExp_poi <- round(0.075*nrow(x@meta.data))  ## Assuming 7.5% doublet formation rate 
+  nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop))
+
+  x <- doubletFinder(x, PCs = 1:20, pN = 0.25, pK = 0.09, nExp = nExp_poi, reuse.pANN = FALSE, sct = FALSE)
+  x
+})
+```
+
+
+```{r eval=FALSE}
+saveRDS(seu_list,file = paste0(outdir,"SoupX_filtered_sample_list_wQC_info.rds"))
+```
+
+
+
+
+## merge and process
+
+
+```{r}
+whole <- Reduce(function(x, y) merge(x, y), seu_list)
+```
+
+
+```{r}
+colnames(whole@meta.data)
+table(whole$DF.classifications_0.25_0.09_122)["Doublet"]
+unname(table(whole$DF.classifications_0.25_0.09_122)["Doublet"])
+```
+
+```{r}
+whole@meta.data <- whole@meta.data %>% mutate(
+  pANN_0.25_0.09 = coalesce(pANN_0.25_0.09_85, pANN_0.25_0.09_177, pANN_0.25_0.09_96, pANN_0.25_0.09_122),
+  DF.classifications_0.25_0.09 = coalesce(DF.classifications_0.25_0.09_85,DF.classifications_0.25_0.09_177, DF.classifications_0.25_0.09_96, DF.classifications_0.25_0.09_122))
+
+
+```
+
+```{r}
+whole@meta.data[,paste0("pANN_0.25_0.09_",c(85,177,96,122))] <- NULL
+whole@meta.data[,paste0("DF.classifications_0.25_0.09_",c(85,177,96,122))] <- NULL
+```
+
+
+```{r}
+colnames(whole@meta.data)
+```
+
+
+```{r}
+ggplot(whole@meta.data,aes(x = log10_nCount_RNA, y = percent.mt))+
+  facet_wrap(~orig.ident+miQC.keep, scales = "free")+
+  geom_point()+
+  theme_classic()
+
+ggplot(whole@meta.data,aes(x = log10_nCount_RNA, y = percent.mt))+
+  facet_wrap(~orig.ident+mitoQC, scales = "free")+
+  geom_point()+
+  theme_classic()
+
+ggplot(whole@meta.data,aes(x = log10_nCount_RNA, y = percent.mt))+
+  facet_wrap(~orig.ident+DF.classifications_0.25_0.09, scales = "free")+
+  geom_point()+
+  theme_classic()
+
+```
+use `is.Outlier` results
+
+```{r}
+whole <- subset(whole, subset = mitoQC == "keep" & DF.classifications_0.25_0.09 == "Singlet")
+```
+
+
+```{r}
+# parameters can be changed but doesn't matter much for most of the analysis
+whole <- NormalizeData(object = whole, normalization.method = "LogNormalize", scale.factor = 10000)
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+#VariableFeatures(whole) <-  VariableFeatures(whole) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(whole))]
+#VariableFeaturePlot(whole)
+
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+```
+
+```{r message=FALSE}
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20) # use harmony to correct for batch effect
+whole <- RunUMAP(whole,dims = 1:20,reduction = "harmony") # use harmony embedding for downstream analysis
+whole <- RunTSNE(whole,dims = 1:20,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+whole <- JoinLayers(whole) # required for seurat V5
+```
+
+
+```{r}
+DimPlot(whole,label = T,split.by = "orig.ident")
+DimPlot(whole,label = T,split.by = "orig.ident",group.by = "RNA_snn_res.0.1")
+DimPlot(whole,label = T,group.by = "RNA_snn_res.0.1")
+DimPlot(whole,label = T,group.by = "RNA_snn_res.1")
+```
+```{r}
+FeaturePlot(whole,features = "percent.mt",label = T)
+FeaturePlot(whole,features = "percent.ribo",label = T) 
+FeaturePlot(whole,features = "log10_nCount_RNA",label = T)
+FeaturePlot(whole,features = "log10_nFeature_RNA",label = T)
+
+``` 
+
+```{r eval=FALSE}
+save(whole, file = paste0(outdir,"whole_V1p3_wDF.Robj"))
+```
+
+```{r}
+Idents(whole) <- "RNA_snn_res.0.1"
+FeaturePlot(whole,features = "log10_nFeature_RNA",label = T)
+FeaturePlot(whole,features = "Mki67",label = T)
+FeaturePlot(whole,features = "P2ry12",label = T)
+FeaturePlot(whole,features = "Cd74",label = T)
+FeaturePlot(whole,features = "Isg15",label = T)
+FeaturePlot(whole,features = "Ifitm3",label = T)
+FeaturePlot(whole,features = "Cd74",label = T)
+FeaturePlot(whole,features = "Trem2",label = T)
+FeaturePlot(whole,features = "Sparc",label = T)
+FeaturePlot(whole,features = "Ccr6",label = T) # Dab2 , Ms4a7, Mertk, Cxcr3, Mrc1, Xcl1, Tgfb1
+FeaturePlot(whole,features = "Dab2",label = T)
+FeaturePlot(whole,features = "Ms4a7",label = T)
+FeaturePlot(whole,features = "Mertk",label = T)
+FeaturePlot(whole,features = "Cx3cr1",label = T)
+FeaturePlot(whole,features = "Mrc1",label = T)
+FeaturePlot(whole,features = "Tgfb1",label = T) 
+FeaturePlot(whole,features = "mt-Nd4l",label = T)
+```
+
+
+```{r}
+FeaturePlot(whole,features = "Dgat1",label = T)
+FeaturePlot(whole,features = "Dgat2",label = T)
+FeaturePlot(whole,features = "Spp1",label = T)
+FeaturePlot(whole,features = "Dkk2",label = T)
+FeaturePlot(whole,features = "Gpnmb",label = T)
+```
+
+```{r}
+DotPlot(whole, features = c("Ptprc","Itgae","Itgam","Itgax","Csf1","P2ry12","Sall1","Hexb","Sparc","Dab2","Ccr6","Cd74","Ifitm3","Isg15","Ms4a7","Cd9","Gpnmb","Spp1","Axl","Mertk","Cx3cr1","Tmem119","Mrc1","Xcl1","Tgfb1","Stat1","Hsp90aa1","Hspd1","Mki67","Top2a","mt-Nd4l"),group.by = "RNA_snn_res.0.1")+RotatedAxis()
+```
+
+
+

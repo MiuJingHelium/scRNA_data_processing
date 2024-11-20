@@ -1,0 +1,1784 @@
+---
+title: "1-preliminary_analysis+secondary processing"
+output: html_document
+date: "2024-08-06"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony)
+```
+
+The consolidated Rmd does not contain the TCR-seq analysis part because the initial TCR-seq codes weren't used for generating the final analysis. Refer to the version notes for the complete codes.
+
+# generate T cell subset: the subset of interest
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony)
+library(DoubletFinder)
+library(miQC)
+library(SoupX)
+library(data.table)
+library(SeuratWrappers)
+```
+```{r}
+indir = "./R_outs/"
+outdir = "./R_outs/"
+```
+
+
+## step 1: process subset for SCN object creation
+(we will add the corresponding TCR layer for step 2)
+
+```{r}
+load(paste0(outdir,"T_cells_DF_res06.Robj"))
+```
+
+```{r}
+#we don't need to renormalize, but some pacakge will invoke the normalization command :) 
+T_cells <- NormalizeData(T_cells,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+T_cells <- FindVariableFeatures(object = T_cells, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+VariableFeatures(T_cells) <-  VariableFeatures(T_cells)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(T_cells))]
+VariableFeaturePlot(T_cells)
+
+T_cells <- ScaleData(object = T_cells, features = VariableFeatures(object = T_cells), vars.to.regress = c("nCount_RNA", "percent.mt"))
+T_cells <- RunPCA(object = T_cells,
+                features =  VariableFeatures(object = T_cells),
+                dims = 1:50)
+gc()
+```
+
+```{r}
+ElbowPlot(T_cells,ndims = 50)
+```
+
+
+```{r}
+T_cells <- RunHarmony(object = T_cells, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+T_cells <- RunUMAP(T_cells,dims = 1:30,reduction = "harmony")
+T_cells <- RunTSNE(T_cells,dims = 1:30,reduction = "harmony")
+
+T_cells <- FindNeighbors(T_cells, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  T_cells <- FindClusters(object = T_cells, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+```{r}
+library(RColorBrewer)
+```
+
+
+```{r}
+mypalette <- c(brewer.pal(n = 8, name = "YlOrRd")[3:8],brewer.pal(n = 8, name = "YlGnBu")[5:8],brewer.pal(n = 8, name = "YlOrBr")[5:8],brewer.pal(n = 8, name = "YlGn")[4:8],brewer.pal(n = 8, name = "YlOrBr")[5:8],brewer.pal(n = 8, name = "Purples")[3:8],brewer.pal(n = 8, name = "Greys")[3:7],brewer.pal(n = 8, name = "PuRd")[3:8])
+```
+
+```{r}
+DimPlot(T_cells, reduction = "umap",split.by = "orig.ident",shuffle = T,ncol = 2)
+DimPlot(T_cells, reduction = "umap",group.by = "RNA_snn_res.0.1",label = T)
+DimPlot(T_cells, reduction = "umap",label=T)
+```
+
+```{r}
+save(T_cells,file=paste0(outdir,"T_cells_DF_res06.Robj"))
+```
+
+```{r}
+load(paste0(outdir,"T_cells_DF_res06.Robj"))
+```
+
+
+```{r}
+Idents(T_cells) <- T_cells$RNA_snn_res.1
+FeaturePlot(T_cells,features = "Cd3e",reduction = "umap",label = T)
+
+FeaturePlot(T_cells,features = "Ncr1",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Cd4",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Cd8a",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Adgre1",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Mki67",reduction = "umap",label = T)
+```
+```{r}
+DotPlot(T_cells,features = c("Cd3e","Ncr1","Tyrobp","Xcl1","Cd8a","Cd4","Ccr7","Sell","Ly6c1","Tox","Pdcd1","Il4","Il17a","Itgam","Itgax","Cd7","Gzmb","Cx3cr1","Cd40lg","Bcl3","Foxp3","Slamf6","Isg15","Cd69","Trgv2"))+RotatedAxis()
+FeaturePlot(T_cells,features = "Ccr7",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Foxp3",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Il4",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Tyrobp",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Isg15",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Cd40lg",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Gzmb",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Gzma",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Egr1",reduction = "umap",label = T)
+```
+
+remove 18 because it is not Cd3e high
+
+```{r}
+T_cells_V2 <- subset(T_cells, idents = c(1:17,19))
+```
+
+```{r}
+FeaturePlot(T_cells,features = "Ccr7",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Foxp3",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Il4",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Tyrobp",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Isg15",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Cd40lg",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Gzmb",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Gzma",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Egr1",reduction = "umap",label = T)
+```
+
+```{r}
+Idents(T_cells) <- T_cells$RNA_snn_res.1
+FeaturePlot(T_cells,features = "Cd4",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Cd8a",reduction = "umap",label = T)
+DotPlot(T_cells,features = c("Cd8a","Cd4","Foxp3","Ncr1","Ccr2","Cx3cr1","Sell","Ccr7","Gzmb","Lyz2","Il2ra","Cd69","Tbx21","Ikzf2"))+RotatedAxis()
+
+```
+
+
+```{r}
+cluster_prop <- T_cells@meta.data %>% group_by(orig.ident,RNA_snn_res.1) %>%
+  summarise(n = n()) %>% mutate(proportion = 100*n/sum(n))
+
+p1 <- ggplot(cluster_prop,aes(x = orig.ident, y = proportion,fill = orig.ident))+
+  geom_bar(stat = "identity", position = 'dodge')+
+  facet_wrap(~RNA_snn_res.1,scales = "free")+guides(fill=guide_legend(title="Condition"))+ ylab("Percentage of all T cells")+
+  theme(
+  plot.title = element_blank(),
+  axis.title.x = element_blank())+RotatedAxis()
+
+#g <- gridExtra::grid.arrange(grobs = list(p1),nrow = 4)
+ggsave(filename = paste0(outdir,"Proportion_barplots_res1_T_DF.pdf"), plot = p1, units = "cm",height = 40,width = 20)
+```
+
+```{r}
+T_cells <- JoinLayers(T_cells)
+```
+
+
+### process V2
+
+```{r}
+T_cells_V2 <- FindVariableFeatures(object = T_cells_V2, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+VariableFeatures(T_cells_V2) <-  VariableFeatures(T_cells_V2)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(T_cells_V2))]
+VariableFeaturePlot(T_cells_V2)
+
+T_cells_V2 <- ScaleData(object = T_cells_V2, features = VariableFeatures(object = T_cells_V2), vars.to.regress = c("nCount_RNA", "percent.mt"))
+T_cells_V2 <- RunPCA(object = T_cells_V2,
+                features =  VariableFeatures(object = T_cells_V2),
+                dims = 1:50)
+gc()
+T_cells_V2 <- RunHarmony(object = T_cells_V2, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+T_cells_V2 <- RunUMAP(T_cells_V2,dims = 1:30,reduction = "harmony")
+T_cells_V2 <- RunTSNE(T_cells_V2,dims = 1:30,reduction = "harmony")
+
+T_cells_V2 <- FindNeighbors(T_cells_V2, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  T_cells_V2 <- FindClusters(object = T_cells_V2, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+```{r}
+Idents(T_cells_V2) <- T_cells_V2$RNA_snn_res.1
+FeaturePlot(T_cells_V2,features = "Cd3e",reduction = "umap",label = T)
+
+FeaturePlot(T_cells_V2,features = "Ncr1",reduction = "umap",label = T)
+FeaturePlot(T_cells_V2,features = "Cd4",reduction = "umap",label = T)
+FeaturePlot(T_cells_V2,features = "Cd8a",reduction = "umap",label = T)
+FeaturePlot(T_cells_V2,features = "Adgre1",reduction = "umap",label = T)
+FeaturePlot(T_cells_V2,features = "Mki67",reduction = "umap",label = T)
+```
+
+```{r}
+DotPlot(T_cells_V2,features = c("Cd3e","Ncr1","Tyrobp","Xcl1","Cd8a","Cd4","Ccr7","Sell","Ly6c1","Tox","Pdcd1","Il4","Il17a","Itgam","Itgax","Cd7","Gzmb","Cx3cr1","Cd40lg","Bcl3","Foxp3","Slamf6","Isg15","Cd69","Trgv2"))+RotatedAxis()
+```
+
+```{r}
+VlnPlot(T_cells_V2,features = c("Cd4","Cd8a"))
+```
+
+```{r}
+save(T_cells_V2,file=paste0(outdir,"T_cells_DF_res06_V2.Robj"))
+```
+
+
+# start with whole_DF and generate V2p1 whole object for subset creation
+This is the markdown file for second version processing of the tauopathy dataset on the role of cDC1 ablation on protective phenotypes in neurogeneration.
+
+In this version, the low quality cell cluster (2) from previous version will be removed. The subsets will be isolated for additional cluster-based doublet removal. The final whole dataset will be generated by merging the cleaned subsets.
+
+
+```{r}
+indir <- "./R_outs/"
+outdir <- "./R_outs/"
+```
+
+```{r}
+load(paste0(outdir,"whole_DoubletFinder.Robj"))
+```
+
+```{r}
+DimPlot(whole)
+```
+
+```{r}
+Idents(whole) <- whole$RNA_snn_res.0.6
+DimPlot(whole,label = T)
+```
+
+```{r}
+whole <- subset(whole, idents = c(0:22)[! c(0:22) %in% c(2,19)])
+```
+
+remove all cells suggested for removal by miQC (mark as V2p1; V2p0 was only removing high mt cluster)
+
+```{r}
+table(whole$miQC.keep)
+```
+
+```{r}
+whole <- subset(whole,subset = miQC.keep == "keep")
+```
+
+```{r}
+whole <- NormalizeData(object = whole, normalization.method = "LogNormalize", scale.factor = 10000)
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(whole) <-  VariableFeatures(whole) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(whole))]
+VariableFeaturePlot(whole)
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+
+```
+
+```{r}
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+whole <- RunUMAP(whole,dims = 1:30,reduction = "harmony")
+whole <- RunTSNE(whole,dims = 1:30,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DimPlot(whole, group.by = "RNA_snn_res.0.6",label = T)
+```
+
+```{r}
+Idents(whole) <- whole$RNA_snn_res.0.6
+FeaturePlot(whole,features = c("Cd3e"),label = T)
+FeaturePlot(whole,features = c("Ncr1"),label = T)
+FeaturePlot(whole,features = c("Rorc"),label = T)
+FeaturePlot(whole,features = c("Gata3"),label = T)
+FeaturePlot(whole,features = c("P2ry12"),label = T)
+FeaturePlot(whole,features = c("Cd19"),label = T)
+FeaturePlot(whole,features = c("Cd200r3"),label = T)
+FeaturePlot(whole,features = c("Mpo"),label = T)
+FeaturePlot(whole,features = c("Flt3"),label = T)
+FeaturePlot(whole,features = c("Mki67"),label = T)
+```
+
+```{r}
+save(whole,file = paste0(outdir,"whole_V2p1.Robj"))
+```
+
+### isolate lymphoid and non-lymphoid compartment
+
+```{r}
+lymphoid <- subset(whole,idents = c(0:22)[c(0:22) %in% c(0,1,2,3,4,5,7,8,9,10,12,15,16,17,19,20,21)])
+non_lymphoid <- subset(whole,idents = c(0:22)[!c(0:22) %in% c(0,1,2,3,4,5,7,8,9,10,12,15,16,17,19,20,21)])
+```
+
+```{r}
+lymphoid <- NormalizeData(object = lymphoid, normalization.method = "LogNormalize", scale.factor = 10000)
+lymphoid <- FindVariableFeatures(object = lymphoid, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(lymphoid) <-  VariableFeatures(lymphoid) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(lymphoid))]
+VariableFeaturePlot(lymphoid)
+lymphoid <- ScaleData(object = lymphoid, features = VariableFeatures(object = lymphoid), vars.to.regress = c("nCount_RNA", "percent.mt"))
+lymphoid <- RunPCA(object = lymphoid,
+                features =  VariableFeatures(object = lymphoid),
+                dims = 1:50)
+gc()
+ElbowPlot(lymphoid,ndims = 50)
+```
+
+Need to temporarily store lym and non-lym
+
+```{r}
+save(lymphoid,file = paste0(outdir,"lymphoid_V2p1.Robj"))
+save(non_lymphoid,file = paste0(outdir,"non_lymphoid_V2p1.Robj"))
+```
+
+```{r}
+lymphoid <- RunHarmony(object = lymphoid, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+lymphoid <- RunUMAP(lymphoid,dims = 1:30,reduction = "harmony")
+lymphoid <- RunTSNE(lymphoid,dims = 1:30,reduction = "harmony")
+
+lymphoid <- FindNeighbors(lymphoid, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  lymphoid <- FindClusters(object = lymphoid, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DotPlot(lymphoid,features = c("Cd3e","Cd8a","Cd4","Cd19","Lyz2","Fn1","Xcr1","P2ry12","Ncr1","Siglech","S100a8","Mpo","Fcer2a","Flt3","Cd200r3","Gata3","Il7r","Mki67"))+RotatedAxis()
+```
+
+```{r}
+DimPlot(lymphoid,label = T)
+```
+
+```{r}
+FeaturePlot(lymphoid,features = c("Cd3e"),label = T)
+FeaturePlot(lymphoid,features = c("Cd4"),label = T)
+FeaturePlot(lymphoid,features = c("Cd8a"),label = T)
+FeaturePlot(lymphoid,features = c("Ncr1"),label = T)
+```
+
+```{r}
+DotPlot(lymphoid,features = c("Cd3e","Cd8a","Cd4","Pdcd1","Sell","Isg15","Rsad2","Gzmb","Tigit","Lag3","Ikzf2","Nkg7","Ncr1","Rorc","Gata3","Il7r","Mki67"))+RotatedAxis()
+```
+
+```{r}
+lymphoid <- subset(lymphoid,idents = c(0:22)[!c(0:22) %in% c(16,20)])
+```
+
+```{r}
+lymphoid <- FindVariableFeatures(object = lymphoid, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(lymphoid) <-  VariableFeatures(lymphoid) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(lymphoid))]
+VariableFeaturePlot(lymphoid)
+lymphoid <- ScaleData(object = lymphoid, features = VariableFeatures(object = lymphoid), vars.to.regress = c("nCount_RNA", "percent.mt"))
+lymphoid <- RunPCA(object = lymphoid,
+                features =  VariableFeatures(object = lymphoid),
+                dims = 1:50)
+gc()
+ElbowPlot(lymphoid,ndims = 50)
+lymphoid <- RunHarmony(object = lymphoid, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+lymphoid <- RunUMAP(lymphoid,dims = 1:30,reduction = "harmony")
+lymphoid <- RunTSNE(lymphoid,dims = 1:30,reduction = "harmony")
+
+lymphoid <- FindNeighbors(lymphoid, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  lymphoid <- FindClusters(object = lymphoid, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+FeaturePlot(lymphoid,features = c("Cd3e"),label = T)
+FeaturePlot(lymphoid,features = c("Cd4"),label = T)
+FeaturePlot(lymphoid,features = c("Cd8a"),label = T)
+FeaturePlot(lymphoid,features = c("Ncr1"),label = T)
+```
+
+```{r}
+DotPlot(lymphoid,features = c("Cd3e","Cd8a","Cd4","Pdcd1","Sell","Isg15","Rsad2","Gzmb","Tigit","Lag3","Ikzf2","Nkg7","Ncr1","Rorc","Gata3","Il7r","Mki67"))+RotatedAxis()
+```
+
+```{r}
+lymphoid <- JoinLayers(lymphoid)
+```
+
+```{r}
+save(lymphoid,file = paste0(outdir,"lymphoid_V2p1.Robj"))
+```
+
+```{r}
+non_lymphoid <- FindVariableFeatures(object = non_lymphoid, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(non_lymphoid) <-  VariableFeatures(non_lymphoid) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(non_lymphoid))]
+VariableFeaturePlot(non_lymphoid)
+non_lymphoid <- ScaleData(object = non_lymphoid, features = VariableFeatures(object = non_lymphoid), vars.to.regress = c("nCount_RNA", "percent.mt"))
+non_lymphoid <- RunPCA(object = non_lymphoid,
+                features =  VariableFeatures(object = non_lymphoid),
+                dims = 1:50)
+gc()
+ElbowPlot(non_lymphoid,ndims = 50)
+non_lymphoid <- RunHarmony(object = non_lymphoid, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+non_lymphoid <- RunUMAP(non_lymphoid,dims = 1:15,reduction = "harmony")
+non_lymphoid <- RunTSNE(non_lymphoid,dims = 1:15,reduction = "harmony")
+
+non_lymphoid <- FindNeighbors(non_lymphoid, dims = 1:15,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  non_lymphoid <- FindClusters(object = non_lymphoid, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DimPlot(non_lymphoid)
+```
+
+```{r}
+FeaturePlot(non_lymphoid,features = c("Cd3e"),label = T)
+FeaturePlot(non_lymphoid,features = c("Ncr1"),label = T)
+FeaturePlot(non_lymphoid,features = c("Siglech"),label = T)
+FeaturePlot(non_lymphoid,features = c("P2ry12"),label = T)
+```
+
+```{r}
+DotPlot(non_lymphoid,features = c("Cd3e","Cd8a","Cd4","Cd19","Lyz2","Fn1","Xcr1","P2ry12","Ncr1","Siglech","S100a8","Mpo","Fcer2a","Flt3","Cd200r3","Gata3","Il7r","Mki67"))+RotatedAxis()
+```
+
+```{r}
+non_lymphoid <- subset(non_lymphoid,idents = c(0:14)[!c(0:14) %in% c(3,12)])
+```
+
+```{r}
+non_lymphoid <- FindVariableFeatures(object = non_lymphoid, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(non_lymphoid) <-  VariableFeatures(non_lymphoid) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(non_lymphoid))]
+VariableFeaturePlot(non_lymphoid)
+non_lymphoid <- ScaleData(object = non_lymphoid, features = VariableFeatures(object = non_lymphoid), vars.to.regress = c("nCount_RNA", "percent.mt"))
+non_lymphoid <- RunPCA(object = non_lymphoid,
+                features =  VariableFeatures(object = non_lymphoid),
+                dims = 1:50)
+gc()
+ElbowPlot(non_lymphoid,ndims = 50)
+non_lymphoid <- RunHarmony(object = non_lymphoid, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+non_lymphoid <- RunUMAP(non_lymphoid,dims = 1:15,reduction = "harmony")
+non_lymphoid <- RunTSNE(non_lymphoid,dims = 1:15,reduction = "harmony")
+
+non_lymphoid <- FindNeighbors(non_lymphoid, dims = 1:15,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  non_lymphoid <- FindClusters(object = non_lymphoid, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DimPlot(non_lymphoid,label = T)
+DotPlot(non_lymphoid,features = c("Cd3e","Cd8a","Cd4","Cd19","Lyz2","Fn1","Xcr1","P2ry12","Ncr1","Siglech","S100a8","Mpo","Fcer2a","Flt3","Cd200r3","Gata3","Il7r","Mki67"))+RotatedAxis()
+```
+
+```{r}
+non_lymphoid <- subset(non_lymphoid,idents = c(0:15)[!c(0:15) %in% c(7)])
+```
+
+```{r}
+non_lymphoid <- FindVariableFeatures(object = non_lymphoid, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(non_lymphoid) <-  VariableFeatures(non_lymphoid) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(non_lymphoid))]
+VariableFeaturePlot(non_lymphoid)
+non_lymphoid <- ScaleData(object = non_lymphoid, features = VariableFeatures(object = non_lymphoid), vars.to.regress = c("nCount_RNA", "percent.mt"))
+non_lymphoid <- RunPCA(object = non_lymphoid,
+                features =  VariableFeatures(object = non_lymphoid),
+                dims = 1:50)
+gc()
+ElbowPlot(non_lymphoid,ndims = 50)
+non_lymphoid <- RunHarmony(object = non_lymphoid, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+non_lymphoid <- RunUMAP(non_lymphoid,dims = 1:15,reduction = "harmony")
+non_lymphoid <- RunTSNE(non_lymphoid,dims = 1:15,reduction = "harmony")
+
+non_lymphoid <- FindNeighbors(non_lymphoid, dims = 1:15,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  non_lymphoid <- FindClusters(object = non_lymphoid, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DimPlot(non_lymphoid,label = T)
+DotPlot(non_lymphoid,features = c("Cd3e","Cd8a","Cd4","Cd19","Lyz2","Fn1","Xcr1","P2ry12","Ncr1","Siglech","S100a8","Mpo","Fcer2a","Flt3","Cd200r3","Gata3","Il7r","Mki67"))+RotatedAxis()
+```
+
+```{r}
+save(non_lymphoid,file = paste0(outdir,"non_lymphoid_V2p0.Robj"))
+```
+
+### isolate T cell compartment
+
+```{r}
+T_cells <- subset(lymphoid,idents = c(0:22)[c(0:22) %in% c(16,9,18,17,2,5,11,14,1,0,6,10,20,4,21,22)])
+non_T <- subset(lymphoid,idents = c(0:22)[!c(0:22) %in% c(16,9,18,17,2,5,11,14,1,0,6,10,20,4,21,22)])
+```
+
+Or we can do
+
+```{r}
+convT <- subset(lymphoid,idents = c(0:20)[c(0:20) %in% c(0,1,2,4,5,7,10,11,13,17,18,19)])
+non_convT <- subset(lymphoid,idents = c(0:20)[!c(0:20) %in% c(0,1,2,4,5,7,10,11,13,17,18,19)])
+
+```
+
+temporarily saving
+
+```{r}
+save(T_cells,file = paste0(outdir,"T_cells_V2p0.Robj"))
+save(non_T,file = paste0(outdir,"lymphoid_non_T_V2p0.Robj"))
+```
+
+```{r}
+save(convT,file = paste0(outdir,"lymphoid_convT_V2p1.Robj"))
+save(non_convT,file = paste0(outdir,"lymphoid_non_convT_V2p1.Robj"))
+```
+
+I'll jump to Feb 26 :)
+
+## Feb 25 continue
+
+```{r}
+load(paste0(outdir,"T_cells_V2p0.Robj"))
+load(paste0(outdir,"lymphoid_non_T_V2p0.Robj"))
+```
+
+### check for doublets/multiplets in non-T
+
+\*\*mac : cmd+option+I to insert code chunk
+
+```{r}
+non_T <- FindVariableFeatures(object = non_T, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(non_T) <-  VariableFeatures(non_T) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(non_T))]
+VariableFeaturePlot(non_T)
+non_T <- ScaleData(object = non_T, features = VariableFeatures(object = non_T), vars.to.regress = c("nCount_RNA", "percent.mt"))
+non_T <- RunPCA(object = non_T,
+                features =  VariableFeatures(object = non_T),
+                dims = 1:50)
+gc()
+ElbowPlot(non_T,ndims = 50)
+```
+
+```{r}
+non_T <- RunHarmony(object = non_T, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+non_T <- RunUMAP(non_T,dims = 1:30,reduction = "harmony")
+non_T <- RunTSNE(non_T,dims = 1:30,reduction = "harmony")
+
+non_T <- FindNeighbors(non_T, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  non_T <- FindClusters(object = non_T, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DimPlot(non_T,label = T)
+```
+
+```{r}
+DotPlot(non_T,features = c("Cd3e","Cd8a","Cd4","Pdcd1","Sell","Isg15","Rsad2","Gzmb","Tigit","Lag3","Ikzf2","Nkg7","Ncr1","Rorc","Gata3","Il7r","Mki67"))+RotatedAxis()
+DotPlot(non_T,features = c("Cd3e","Cd8a","Cd4","Cd19","Lyz2","Fn1","Xcr1","P2ry12","Ncr1","Siglech","S100a8","Mpo","Fcer2a","Flt3","Cd200r3","Gata3","Il7r","Mki67"))+RotatedAxis()
+```
+
+```{r}
+non_T <- subset(non_T,idents = c(0:13))
+save(non_T,file = paste0(outdir,"lymphoid_non_T_V2p0.Robj"))
+```
+
+```{r}
+T_cells <- FindVariableFeatures(object = T_cells, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(T_cells) <-  VariableFeatures(T_cells) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(T_cells))]
+VariableFeaturePlot(T_cells)
+T_cells <- ScaleData(object = T_cells, features = VariableFeatures(object = T_cells), vars.to.regress = c("nCount_RNA", "percent.mt"))
+T_cells <- RunPCA(object = T_cells,
+                features =  VariableFeatures(object = T_cells),
+                dims = 1:50)
+gc()
+ElbowPlot(T_cells,ndims = 50)
+```
+
+```{r}
+T_cells <- RunHarmony(object = T_cells, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+T_cells <- RunUMAP(T_cells,dims = 1:30,reduction = "harmony")
+T_cells <- RunTSNE(T_cells,dims = 1:30,reduction = "harmony")
+
+T_cells <- FindNeighbors(T_cells, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  T_cells <- FindClusters(object = T_cells, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DimPlot(T_cells,label = T)
+```
+
+```{r}
+DotPlot(T_cells,features = c("Cd3e","Cd8a","Cd4","Cd19","Lyz2","Fn1","Xcr1","P2ry12","Ncr1","Siglech","S100a8","Mpo","Fcer2a","Flt3","Cd200r3","Gata3","Il7r","Mki67"))+RotatedAxis()
+```
+
+```{r}
+save(T_cells,file = paste0(outdir,"T_cells_V2p0.Robj"))
+```
+
+### merge for second round processing
+
+```{r}
+lymphoid <- merge(T_cells,non_T)
+```
+
+```{r}
+lymphoid <- NormalizeData(object = lymphoid, normalization.method = "LogNormalize", scale.factor = 10000)
+lymphoid <- FindVariableFeatures(object = lymphoid, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(lymphoid) <-  VariableFeatures(lymphoid) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(lymphoid))]
+VariableFeaturePlot(lymphoid)
+lymphoid <- ScaleData(object = lymphoid, features = VariableFeatures(object = lymphoid), vars.to.regress = c("nCount_RNA", "percent.mt"))
+lymphoid <- RunPCA(object = lymphoid,
+                features =  VariableFeatures(object = lymphoid),
+                dims = 1:50)
+gc()
+ElbowPlot(lymphoid,ndims = 50)
+```
+
+```{r}
+lymphoid <- RunHarmony(object = lymphoid, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+lymphoid <- RunUMAP(lymphoid,dims = 1:30,reduction = "harmony")
+lymphoid <- RunTSNE(lymphoid,dims = 1:30,reduction = "harmony")
+
+lymphoid <- FindNeighbors(lymphoid, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  lymphoid <- FindClusters(object = lymphoid, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DimPlot(lymphoid,label = T)
+DotPlot(lymphoid,features = c("Cd3e","Cd8a","Cd4","Cd19","Lyz2","Fn1","Xcr1","P2ry12","Ncr1","Siglech","S100a8","Mpo","Fcer2a","Flt3","Cd200r3","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+```
+
+```{r}
+save(lymphoid,file = paste0(outdir,"lymphoid_V2p0.Robj"))
+```
+
+```{r}
+FeaturePlot(lymphoid,features = "Cd3e",label = T)
+```
+
+```{r}
+T_cells <- subset(lymphoid,idents = c(0:20)[c(0:20) %in% c(0,1,2,4,5,6,8,10,12,13,14,16,17,18,19)])
+non_T <- subset(lymphoid,idents = c(0:20)[!c(0:20) %in% c(0,1,2,4,5,6,8,10,12,13,14,16,17,18,19)])
+```
+
+```{r}
+save(T_cells,file = paste0(outdir,"T_cells_V2p0.Robj"))
+save(non_T,file = paste0(outdir,"lymphoid_non_T_V2p0.Robj")) #currently non-T is unprocessed
+```
+
+```{r}
+T_cells <- FindVariableFeatures(object = T_cells, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(T_cells) <-  VariableFeatures(T_cells) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(T_cells))]
+VariableFeaturePlot(T_cells)
+T_cells <- ScaleData(object = T_cells, features = VariableFeatures(object = T_cells), vars.to.regress = c("nCount_RNA", "percent.mt"))
+T_cells <- RunPCA(object = T_cells,
+                features =  VariableFeatures(object = T_cells),
+                dims = 1:50)
+gc()
+ElbowPlot(T_cells,ndims = 50)
+```
+
+```{r}
+T_cells <- RunHarmony(object = T_cells, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+T_cells <- RunUMAP(T_cells,dims = 1:20,reduction = "harmony")
+T_cells <- RunTSNE(T_cells,dims = 1:20,reduction = "harmony")
+
+T_cells <- FindNeighbors(T_cells, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  T_cells <- FindClusters(object = T_cells, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DimPlot(T_cells,label = T)
+```
+
+```{r}
+DotPlot(T_cells,features = c("Cd3e","Cd8a","Cd4","Cd19","Lyz2","Fn1","Xcr1","P2ry12","Ncr1","Siglech","S100a8","Mpo","Fcer2a","Flt3","Cd200r3","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+```
+
+```{r}
+FeaturePlot(T_cells,features = "Ncr1",label = T)
+FeaturePlot(T_cells,features = "Cd3e",label = T)
+FeaturePlot(T_cells,features = "Fcgr3",label = T)
+FeaturePlot(T_cells,features = "Tyrobp",label = T)
+FeaturePlot(T_cells,features = "Sell",label = T)
+FeaturePlot(T_cells,features = "Il2ra",label = T)
+FeaturePlot(T_cells,features = "Cd8a",label = T)
+FeaturePlot(T_cells,features = "Cd4",label = T)
+FeaturePlot(T_cells,features = "Gzma",label = T)
+FeaturePlot(T_cells,features = "Gzmb",label = T)
+FeaturePlot(T_cells,features = "Prf1",label = T)
+```
+
+```{r}
+FeaturePlot(T_cells,features = "nFeature_RNA_log10",label = T,min.cutoff = 3.5)
+FeaturePlot(T_cells,features = "nFeature_RNA",label = T,min.cutoff = 3500)
+FeaturePlot(T_cells,features = "nCount_RNA_log10",label = T,min.cutoff = 3.75)
+FeaturePlot(T_cells,features = "nCount_RNA",label = T,min.cutoff = 20000)
+```
+
+```{r}
+VlnPlot(T_cells,features = c("nFeature_RNA_log10","nCount_RNA_log10"),alpha = 0.1)
+VlnPlot(T_cells,features = c("nFeature_RNA","nCount_RNA"),alpha = 0.1)
+```
+
+```{r}
+DotPlot(T_cells,features = c("Cd3e","Cd8a","Cd4","Gzmb","Gzma","Prf1","Sell","Il1b","Il2ra","Tyrobp","Ncr1","Ncam1","Fcgr3","Xcl1","Cx3cr1","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+```
+
+```{r}
+c11 <- subset(T_cells,idents = 11)
+T_cells <- subset(T_cells,idents = c(0:10,12:17))
+```
+
+```{r}
+save(c11, file = paste0(outdir,"T_cells_V2p0_c11_vague.Robj"))
+```
+
+```{r}
+T_cells <- FindVariableFeatures(object = T_cells, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(T_cells) <-  VariableFeatures(T_cells) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(T_cells))]
+VariableFeaturePlot(T_cells)
+T_cells <- ScaleData(object = T_cells, features = VariableFeatures(object = T_cells), vars.to.regress = c("nCount_RNA", "percent.mt"))
+T_cells <- RunPCA(object = T_cells,
+                features =  VariableFeatures(object = T_cells),
+                dims = 1:50)
+gc()
+ElbowPlot(T_cells,ndims = 50)
+T_cells <- RunHarmony(object = T_cells, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+T_cells <- RunUMAP(T_cells,dims = 1:20,reduction = "harmony")
+T_cells <- RunTSNE(T_cells,dims = 1:20,reduction = "harmony")
+
+T_cells <- FindNeighbors(T_cells, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  T_cells <- FindClusters(object = T_cells, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DotPlot(T_cells,features = c("Cd3e","Cd8a","Cd4","Gzmb","Gzma","Prf1","Sell","Il1b","Il2ra","Tyrobp","Ncr1","Ncam1","Fcgr3","Xcl1","Cx3cr1","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+FeaturePlot(T_cells,features = "Ncr1",label = T)
+FeaturePlot(T_cells,features = "Cd3e",label = T)
+FeaturePlot(T_cells,features = "Fcgr3",label = T)
+FeaturePlot(T_cells,features = "Tyrobp",label = T)
+FeaturePlot(T_cells,features = "Sell",label = T)
+FeaturePlot(T_cells,features = "Il2ra",label = T)
+FeaturePlot(T_cells,features = "Cd8a",label = T)
+FeaturePlot(T_cells,features = "Cd4",label = T)
+FeaturePlot(T_cells,features = "Gzma",label = T)
+FeaturePlot(T_cells,features = "Gzmb",label = T)
+FeaturePlot(T_cells,features = "Prf1",label = T)
+```
+
+```{r}
+T_cells <- JoinLayers(T_cells)
+save(T_cells,file = paste0(outdir,"T_cells_V2p0.Robj"))
+```
+
+### isolate conventional T cells; Feb 26
+
+```{r}
+convT <- subset(T_cells,idents = c(0:17)[c(0:17) %in% c(0,1,2,3,5,6,7,9,11,13,15,16,17)])
+unconvT <- subset(T_cells,idents = c(0:17)[!c(0:17) %in% c(0,1,2,3,5,6,7,9,11,13,15,16,17)])
+```
+
+```{r}
+DotPlot(convT,features = c("Cd3e","Cd8a","Cd4","Cd19","Lyz2","Fn1","Xcr1","P2ry12","Ncr1","Siglech","S100a8","Mpo","Fcer2a","Flt3","Cd200r3","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+```
+
+```{r}
+save(convT,file = paste0(outdir,"T_cells_conventional_V2p0.Robj"))
+save(unconvT,file = paste0(outdir,"T_cells_unconventional_V2p0.Robj"))
+```
+
+```{r}
+convT <- FindVariableFeatures(object = convT, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(convT) <-  VariableFeatures(convT) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(convT))]
+VariableFeaturePlot(convT)
+convT <- ScaleData(object = convT, features = VariableFeatures(object = convT), vars.to.regress = c("nCount_RNA", "percent.mt"))
+convT <- RunPCA(object = convT,
+                features =  VariableFeatures(object = convT),
+                dims = 1:50)
+gc()
+ElbowPlot(convT,ndims = 50)
+```
+
+```{r}
+convT <- RunHarmony(object = convT, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+convT <- RunUMAP(convT,dims = 1:20,reduction = "harmony")
+convT <- RunTSNE(convT,dims = 1:20,reduction = "harmony")
+
+convT <- FindNeighbors(convT, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1.0, 0.1))  {   
+  convT <- FindClusters(object = convT, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DotPlot(convT,features = c("Cd3e","Cd8a","Cd4","Foxp3","Gzmb","Gzma","Prf1","Sell","Il1b","Il2ra","Tyrobp","Ncr1","Ncam1","Fcgr3","Xcl1","Cx3cr1","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+FeaturePlot(convT,features = "Ncr1",label = T)
+FeaturePlot(convT,features = "Cd3e",label = T)
+FeaturePlot(convT,features = "Fcgr3",label = T)
+FeaturePlot(convT,features = "Tyrobp",label = T)
+FeaturePlot(convT,features = "Sell",label = T)
+FeaturePlot(convT,features = "Il2ra",label = T)
+FeaturePlot(convT,features = "Cd8a",label = T)
+FeaturePlot(convT,features = "Cd4",label = T)
+FeaturePlot(convT,features = "Gzma",label = T)
+FeaturePlot(convT,features = "Gzmb",label = T)
+FeaturePlot(convT,features = "Prf1",label = T)
+FeaturePlot(convT,features = "Foxp3",label = T)
+FeaturePlot(convT,features = "Mki67",label = T)
+```
+
+```{r}
+DotPlot(convT,features = c("Cd3e","Cd8a","Cd4","Cd19","Lyz2","Fn1","Xcr1","P2ry12","Ncr1","Siglech","S100a8","Mpo","Fcer2a","Flt3","Cd200r3","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+```
+
+```{r}
+DimPlot(convT,label = T)
+```
+
+encountered trouble with isolating Cd4+ Sell+ cells from Cd8+ Sell+ cells. I will create a scn link and check the markers.
+
+```{r}
+#skip if V2p1
+convT <- JoinLayers(convT)
+save(convT,file = paste0(outdir,"T_cells_conventional_V2p0.Robj"))
+```
+
+```{r}
+save(convT,file = paste0(outdir,"lymphoid_convT_V2p1.Robj"))
+```
+
+```{r}
+convT <- subset(convT,idents = c(0:16,18))
+```
+
+```{r}
+DotPlot(convT,features = c("Cd3e","Cd8a","Cd4","Foxp3","Gzmb","Gzma","Prf1","Sell","Il1b","Il2ra","Tyrobp","Ncr1","Ncam1","Fcgr3","Xcl1","Cx3cr1","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+```
+
+```{r}
+convT <- FindVariableFeatures(object = convT, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(convT) <-  VariableFeatures(convT) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(convT))]
+VariableFeaturePlot(convT)
+convT <- ScaleData(object = convT, features = VariableFeatures(object = convT), vars.to.regress = c("nCount_RNA", "percent.mt"))
+convT <- RunPCA(object = convT,
+                features =  VariableFeatures(object = convT),
+                dims = 1:50)
+gc()
+ElbowPlot(convT,ndims = 50)
+```
+
+```{r}
+convT <- RunHarmony(object = convT, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+convT <- RunUMAP(convT,dims = 1:20,reduction = "harmony")
+convT <- RunTSNE(convT,dims = 1:20,reduction = "harmony")
+
+convT <- FindNeighbors(convT, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1.0, 0.1))  {   
+  convT <- FindClusters(object = convT, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DotPlot(convT,features = c("Cd3e","Cd8a","Cd4","Foxp3","Gzmb","Gzma","Prf1","Sell","Ccr7","Il1b","Il2ra","Tyrobp","Ncr1","Ncam1","Fcgr3","Xcl1","Cx3cr1","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+DimPlot(convT,label = T)
+FeaturePlot(convT,features = "Ncr1",label = T)
+FeaturePlot(convT,features = "Cd3e",label = T)
+FeaturePlot(convT,features = "Fcgr3",label = T)
+FeaturePlot(convT,features = "Tyrobp",label = T)
+FeaturePlot(convT,features = "Sell",label = T)
+FeaturePlot(convT,features = "Ccr7",label = T)
+FeaturePlot(convT,features = "Il2ra",label = T)
+FeaturePlot(convT,features = "Cd8a",label = T)
+FeaturePlot(convT,features = "Cd4",label = T)
+FeaturePlot(convT,features = "Gzma",label = T)
+FeaturePlot(convT,features = "Gzmb",label = T)
+FeaturePlot(convT,features = "Prf1",label = T)
+FeaturePlot(convT,features = "Foxp3",label = T)
+FeaturePlot(convT,features = "Mki67",label = T)
+```
+
+```{r}
+convT <- JoinLayers(convT)
+save(convT,file = paste0(outdir,"lymphoid_convT_V2p1.Robj"))
+```
+
+### March 4 continue
+
+I need to load the subsets back for processing and merging.
+
+```{r}
+load(paste0(outdir,"lymphoid_convT_V2p1.Robj"))
+```
+
+```{r}
+load(paste0(outdir,"lymphoid_non_convT_V2p1.Robj"))
+load(paste0(outdir,"lymphoid_V2p1.Robj"))
+load(paste0(outdir,"non_lymphoid_V2p1.Robj"))
+```
+
+#### starting with conventional T cells
+
+```{r}
+DimPlot(convT)
+```
+
+```{r}
+FeaturePlot(convT,features = ("Ncr1"),label = T)
+FeaturePlot(convT,features = ("Klrb1c"),label = T)
+```
+
+```{r}
+DotPlot(convT,features = c("Cd3e","Cd8a","Cd4","Foxp3","Gzmb","Gzma","Prf1","Sell","Ccr7","Il1b","Il2ra","Tyrobp","Ncr1","Klrb1c","Ncam1","Fcgr3","Xcl1","Cx3cr1","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+```
+
+```{r}
+
+small_nconvT <- subset(convT,idents = c(6,16))
+convT <- subset(convT,idents = c(0:18)[!c(0:18) %in% c(6,16)])
+```
+
+```{r}
+non_convT <- merge(non_convT,small_nconvT)
+```
+
+Now, process both convT and non-convT
+
+```{r}
+convT <- FindVariableFeatures(object = convT, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(convT) <-  VariableFeatures(convT) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(convT))]
+VariableFeaturePlot(convT)
+convT <- ScaleData(object = convT, features = VariableFeatures(object = convT), vars.to.regress = c("nCount_RNA", "percent.mt"))
+convT <- RunPCA(object = convT,
+                features =  VariableFeatures(object = convT),
+                dims = 1:50)
+gc()
+ElbowPlot(convT,ndims = 50)
+convT <- RunHarmony(object = convT, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+convT <- RunUMAP(convT,dims = 1:20,reduction = "harmony")
+convT <- RunTSNE(convT,dims = 1:20,reduction = "harmony")
+
+convT <- FindNeighbors(convT, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1.0, 0.1))  {   
+  convT <- FindClusters(object = convT, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+non_convT <- NormalizeData(object = non_convT, normalization.method = "LogNormalize", scale.factor = 10000)
+non_convT <- FindVariableFeatures(object = non_convT, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(non_convT) <-  VariableFeatures(non_convT) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(non_convT))]
+VariableFeaturePlot(non_convT)
+non_convT <- ScaleData(object = non_convT, features = VariableFeatures(object = non_convT), vars.to.regress = c("nCount_RNA", "percent.mt"))
+non_convT <- RunPCA(object = non_convT,
+                features =  VariableFeatures(object = non_convT),
+                dims = 1:50)
+gc()
+ElbowPlot(non_convT,ndims = 50)
+```
+
+```{r}
+non_convT <- RunHarmony(object = non_convT, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+non_convT <- RunUMAP(non_convT,dims = 1:20,reduction = "harmony")
+non_convT <- RunTSNE(non_convT,dims = 1:20,reduction = "harmony")
+
+non_convT <- FindNeighbors(non_convT, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1.0, 0.1))  {   
+  non_convT <- FindClusters(object = non_convT, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+non_convT <- JoinLayers(non_convT)
+convT <- JoinLayers(convT)
+```
+
+```{r}
+save(convT,file = paste0(outdir,"lymphoid_convT_V2p1.Robj"))
+save(non_convT,file = paste0(outdir,"lymphoid_non_convT_V2p1.Robj"))
+```
+
+```{r}
+DimPlot(convT,label = T)
+DotPlot(convT,features = c("Cd3e","Cd8a","Cd4","Foxp3","Gzmb","Gzma","Prf1","Sell","Ccr7","Il1b","Il2ra","Tyrobp","Ncr1","Klrb1c","Ncam1","Fcgr3","Xcl1","Cx3cr1","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+```
+
+```{r}
+FeaturePlot(convT,features = ("Ncr1"),label = T)
+FeaturePlot(convT,features = ("Klrb1c"),label = T)
+```
+
+```{r}
+Idents(non_convT) <- non_convT$RNA_snn_res.0.3
+DimPlot(non_convT,label = T)
+DotPlot(non_convT,features = c("Cd3e","Cd8a","Cd4","Foxp3","Gzmb","Gzma","Prf1","Sell","Ccr7","Il1b","Il2ra","Tyrobp","Ncr1","Klrb1c","Ncam1","Fcgr3","Xcl1","Cx3cr1","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+FeaturePlot(non_convT,features = "Cd3d",label = T)
+FeaturePlot(non_convT,features = "Fcgr3",label = T)
+```
+
+```{r}
+# annotate non-convT using resolution of 0.3
+non_convT@meta.data <- non_convT@meta.data %>% 
+  mutate(
+  annotation_prelim = case_match(
+    as.character(RNA_snn_res.0.3),
+    "0" ~ "NK-like_1",
+    "1" ~ "DNT",
+    "2" ~ "gdT",
+    "3" ~ "ILC3_1",
+    "4" ~ "NKT-like_1",
+    "5" ~ "NK-like_2",
+    "6" ~ "NK-like_3",
+    "7" ~ "NK-like_4",
+    "8" ~ "NKT-like_2",
+    "9" ~ "ILC3_2"
+  ),
+  celltype = case_match(
+    as.character(RNA_snn_res.0.3),
+    "0" ~ "NK",
+    "1" ~ "DNT",
+    "2" ~ "gdT",
+    "3" ~ "ILC3",
+    "4" ~ "NKT",
+    "5" ~ "NK",
+    "6" ~ "NK",
+    "7" ~ "NK",
+    "8" ~ "NKT",
+    "9" ~ "ILC3"
+  ) 
+)
+
+
+```
+
+```{r}
+table(non_convT$celltype)
+```
+
+```{r}
+save(non_convT,file = paste0(outdir,"lymphoid_non_convT_V2p1.Robj"))
+```
+
+#### further process non-conventional subset
+
+```{r}
+Idents(convT) <- convT$RNA_snn_res.1
+DimPlot(convT,label = T)
+DotPlot(convT,features = c("Cd3e","Cd8a","Cd4","Foxp3","Gzmb","Gzma","Prf1","Sell","Ccr7","Il1b","Il2ra","Rsad2","Ifitm3","Ifit1","Tyrobp","Ncr1","Klrb1c","Ncam1","Fcgr3","Xcl1","Cx3cr1","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+```
+
+```{r}
+CD4 <- subset(convT,idents = c(0:15)[c(0:15) %in% c(2,7,8,9,11,13)])
+CD8 <- subset(convT,idents = c(0:15)[!c(0:15) %in% c(2,7,8,9,11,13)])
+```
+
+```{r}
+save(CD4,file = paste0(outdir,"lymphoid_convT_CD4_V2p1.Robj"))
+save(CD8,file = paste0(outdir,"lymphoid_convT_CD8_V2p1.Robj"))
+```
+
+##### process subsets
+
+```{r}
+CD4 <- NormalizeData(object = CD4, normalization.method = "LogNormalize", scale.factor = 10000)
+CD4 <- FindVariableFeatures(object = CD4, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD4) <-  VariableFeatures(CD4) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(CD4))]
+VariableFeaturePlot(CD4)
+CD4 <- ScaleData(object = CD4, features = VariableFeatures(object = CD4), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD4 <- RunPCA(object = CD4,
+                features =  VariableFeatures(object = CD4),
+                dims = 1:50)
+gc()
+ElbowPlot(CD4,ndims = 50)
+```
+
+```{r}
+CD4 <- RunHarmony(object = CD4, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD4 <- RunUMAP(CD4,dims = 1:20,reduction = "harmony")
+CD4 <- RunTSNE(CD4,dims = 1:20,reduction = "harmony")
+
+CD4 <- FindNeighbors(CD4, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1.0, 0.1))  {   
+  CD4 <- FindClusters(object = CD4, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+CD4 <- JoinLayers(CD4)
+save(CD4,file = paste0(outdir,"lymphoid_convT_CD4_V2p1.Robj"))
+```
+
+```{r}
+Idents(CD4) <- CD4$RNA_snn_res.1
+DimPlot(CD4,label = T)
+DotPlot(CD4,features = c("Cd3e","Cd8a","Cd4","Foxp3","Gzmb","Gzma","Prf1","Sell","Ccr7","Il1b","Il2ra","Rsad2","Ifitm3","Ifit1","Tyrobp","Ncr1","Klrb1c","Ncam1","Fcgr3","Xcl1","Cx3cr1","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+```
+
+```{r}
+FeaturePlot(CD4,features = "Cd4",label=T)
+FeaturePlot(CD4,features = "Cd8a",label=T)
+```
+
+```{r}
+CD8 <- NormalizeData(object = CD8, normalization.method = "LogNormalize", scale.factor = 10000)
+CD8 <- FindVariableFeatures(object = CD8, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD8) <-  VariableFeatures(CD8) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(CD8))]
+VariableFeaturePlot(CD8)
+CD8 <- ScaleData(object = CD8, features = VariableFeatures(object = CD8), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD8 <- RunPCA(object = CD8,
+                features =  VariableFeatures(object = CD8),
+                dims = 1:50)
+gc()
+ElbowPlot(CD8,ndims = 50)
+```
+
+```{r}
+CD8 <- RunHarmony(object = CD8, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD8 <- RunUMAP(CD8,dims = 1:20,reduction = "harmony")
+CD8 <- RunTSNE(CD8,dims = 1:20,reduction = "harmony")
+
+CD8 <- FindNeighbors(CD8, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1.0, 0.1))  {   
+  CD8 <- FindClusters(object = CD8, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+CD8 <- JoinLayers(CD8)
+save(CD8,file = paste0(outdir,"lymphoid_convT_CD8_V2p1.Robj"))
+```
+
+```{r}
+Idents(CD8) <- CD8$RNA_snn_res.1
+DimPlot(CD8,label = T)
+DotPlot(CD8,features = c("Cd3e","Cd8a","Cd4","Foxp3","Gzmb","Gzma","Prf1","Sell","Ccr7","Il1b","Il2ra","Rsad2","Ifitm3","Ifit1","Tyrobp","Ncr1","Klrb1c","Ncam1","Fcgr3","Xcl1","Cx3cr1","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+```
+
+```{r}
+FeaturePlot(CD8,features = "Cd4",label=T)
+FeaturePlot(CD8,features = "Cd8a",label=T)
+```
+
+```{r}
+CD4_small <- subset(CD8,idents = 9)
+CD8 <- subset(CD8, idents = c(0:13)[!c(0:13) %in% c(9)])
+CD8_small <- subset(CD4,idents = c(2,3))
+CD4 <- subset(CD4,idents = c(0:12)[!c(0:12) %in% c(2,3)])
+```
+
+```{r}
+CD8 <- merge(CD8,CD8_small)
+CD4 <- merge(CD4,CD4_small)
+```
+
+```{r}
+CD8 <- NormalizeData(object = CD8, normalization.method = "LogNormalize", scale.factor = 10000)
+CD8 <- FindVariableFeatures(object = CD8, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD8) <-  VariableFeatures(CD8) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(CD8))]
+VariableFeaturePlot(CD8)
+CD8 <- ScaleData(object = CD8, features = VariableFeatures(object = CD8), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD8 <- RunPCA(object = CD8,
+                features =  VariableFeatures(object = CD8),
+                dims = 1:50)
+gc()
+ElbowPlot(CD8,ndims = 50)
+CD8 <- RunHarmony(object = CD8, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD8 <- RunUMAP(CD8,dims = 1:20,reduction = "harmony")
+CD8 <- RunTSNE(CD8,dims = 1:20,reduction = "harmony")
+
+CD8 <- FindNeighbors(CD8, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1.0, 0.1))  {   
+  CD8 <- FindClusters(object = CD8, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+CD8 <- JoinLayers(CD8)
+save(CD8,file = paste0(outdir,"lymphoid_convT_CD8_V2p1.Robj"))
+```
+
+```{r}
+CD4 <- NormalizeData(object = CD4, normalization.method = "LogNormalize", scale.factor = 10000)
+CD4 <- FindVariableFeatures(object = CD4, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD4) <-  VariableFeatures(CD4) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(CD4))]
+VariableFeaturePlot(CD4)
+CD4 <- ScaleData(object = CD4, features = VariableFeatures(object = CD4), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD4 <- RunPCA(object = CD4,
+                features =  VariableFeatures(object = CD4),
+                dims = 1:50)
+gc()
+ElbowPlot(CD4,ndims = 50)
+CD4 <- RunHarmony(object = CD4, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD4 <- RunUMAP(CD4,dims = 1:20,reduction = "harmony")
+CD4 <- RunTSNE(CD4,dims = 1:20,reduction = "harmony")
+
+CD4 <- FindNeighbors(CD4, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  CD4 <- FindClusters(object = CD4, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+CD4 <- JoinLayers(CD4)
+save(CD4,file = paste0(outdir,"lymphoid_convT_CD4_V2p1.Robj"))
+```
+
+```{r}
+Idents(CD8) <- CD8$RNA_snn_res.1
+DimPlot(CD8,label = T)
+DotPlot(CD8,features = c("Cd3e","Cd8a","Cd4","Foxp3","Gzmb","Gzma","Prf1","Sell","Ccr7","Il1b","Il2ra","Rsad2","Ifitm3","Ifit1","Tyrobp","Ncr1","Klrb1c","Ncam1","Fcgr3","Xcl1","Cx3cr1","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+
+```
+
+```{r}
+Idents(CD4) <- CD4$RNA_snn_res.1
+DimPlot(CD4,label = T)
+DotPlot(CD4,features = c("Cd3e","Cd8a","Cd4","Foxp3","Gzmb","Gzma","Prf1","Sell","Ccr7","Il1b","Il2ra","Rsad2","Ifitm3","Ifit1","Tyrobp","Ncr1","Klrb1c","Ncam1","Fcgr3","Xcl1","Cx3cr1","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+```
+
+```{r}
+FeaturePlot(CD4,features = ("Cd8a"),label = T)
+FeaturePlot(CD4,features = ("Cd4"),label = T)
+```
+
+```{r}
+FeaturePlot(CD8,features = ("Cd8a"),label = T)
+FeaturePlot(CD8,features = ("Cd4"),label = T)
+```
+
+```{r}
+CD8_small <- subset(CD4,idents = c(7,12))
+vague_1 <- subset(CD4,idents = c(1,9,10))
+CD4 <- subset(CD4,idents = c(0:13)[!c(0:13) %in% c(1,9,10,7,12)])
+```
+
+```{r}
+vague_2 <- subset(CD8,idents = c(8,9))
+CD8 <- subset(CD8, idents = c(0:12)[!c(0:12) %in% c(8,9,12)])
+```
+
+```{r}
+DimPlot(CD4)
+DimPlot(CD8)
+```
+
+```{r}
+vague_1@assays$RNA@layers$scale.data <- NULL
+vague_1@assays$RNA@layers$scale.data.1.1 <- NULL
+vague_1@assays$RNA@layers$scale.data.2.1 <- NULL
+vague_1@assays$RNA@layers$scale.data.3.1 <- NULL
+vague_1@assays$RNA@layers$scale.data.4.1 <- NULL
+vague_1@assays$RNA@layers$scale.data.1.2 <- NULL
+vague_1@assays$RNA@layers$scale.data.2 <- NULL
+
+vague_2@assays$RNA@layers$scale.data <- NULL
+vague_2@assays$RNA@layers$scale.data.1.1 <- NULL
+vague_2@assays$RNA@layers$scale.data.2.1 <- NULL
+vague_2@assays$RNA@layers$scale.data.3.1 <- NULL
+vague_2@assays$RNA@layers$scale.data.4.1 <- NULL
+vague_2@assays$RNA@layers$scale.data.1.2 <- NULL
+vague_2@assays$RNA@layers$scale.data.2.2 <- NULL
+vague_2@assays$RNA@layers$scale.data.2 <- NULL
+vague_2@assays$RNA@layers$scale.data.3.2 <- NULL
+vague_2@assays$RNA@layers$scale.data.4.2 <- NULL
+
+```
+
+```{r}
+vague <- merge(vague_1,vague_2)
+```
+
+```{r}
+vague <- NormalizeData(object = vague, normalization.method = "LogNormalize", scale.factor = 10000)
+vague <- FindVariableFeatures(object = vague, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(vague) <-  VariableFeatures(vague) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(vague))]
+VariableFeaturePlot(vague)
+vague <- ScaleData(object = vague, features = VariableFeatures(object = vague), vars.to.regress = c("nCount_RNA", "percent.mt"))
+vague <- RunPCA(object = vague,
+                features =  VariableFeatures(object = vague),
+                dims = 1:50)
+gc()
+ElbowPlot(vague,ndims = 50)
+vague <- RunHarmony(object = vague, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+vague <- RunUMAP(vague,dims = 1:10,reduction = "harmony")
+vague <- RunTSNE(vague,dims = 1:10,reduction = "harmony")
+
+vague <- FindNeighbors(vague, dims = 1:10,reduction = "harmony")
+for(res in seq(0.1, 1.0, 0.1))  {   
+  vague <- FindClusters(object = vague, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+vague <- JoinLayers(vague)
+save(vague,file = paste0(outdir,"lymphoid_convT_vague_V2p1.Robj"))
+```
+
+```{r}
+Idents(vague) <- vague$RNA_snn_res.1
+DimPlot(vague,label = T)
+DotPlot(vague,features = c("Cd3e","Cd8a","Cd4","Foxp3","Gzmb","Gzma","Prf1","Sell","Ccr7","Il1b","Il2ra","Rsad2","Ifitm3","Ifit1","Tyrobp","Ncr1","Klrb1c","Ncam1","Fcgr3","Xcl1","Cx3cr1","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+```
+
+```{r}
+prolif <- subset(vague,idents = c(4,5,6,7))
+prolif$annotation_prelim <- rep("Proliferating T",nrow(prolif@meta.data))
+```
+
+```{r}
+prolif$celltype <- rep("Proliferating T",nrow(prolif@meta.data))
+```
+
+```{r}
+save(prolif,file = paste0(outdir,"lymphoid_convT_prolif_V2p1.Robj"))
+```
+
+Now process CD4
+
+```{r}
+#CD4 <- NormalizeData(object = CD4, normalization.method = "LogNormalize", scale.factor = 10000)
+CD4 <- FindVariableFeatures(object = CD4, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD4) <-  VariableFeatures(CD4) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(CD4))]
+VariableFeaturePlot(CD4)
+CD4 <- ScaleData(object = CD4, features = VariableFeatures(object = CD4), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD4 <- RunPCA(object = CD4,
+                features =  VariableFeatures(object = CD4),
+                dims = 1:50)
+gc()
+ElbowPlot(CD4,ndims = 50)
+CD4 <- RunHarmony(object = CD4, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD4 <- RunUMAP(CD4,dims = 1:20,reduction = "harmony")
+CD4 <- RunTSNE(CD4,dims = 1:20,reduction = "harmony")
+
+CD4 <- FindNeighbors(CD4, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1.0, 0.1))  {   
+  CD4 <- FindClusters(object = CD4, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+CD4 <- JoinLayers(CD4)
+save(CD4,file = paste0(outdir,"lymphoid_convT_CD4_V2p1.Robj"))
+```
+
+```{r}
+Idents(CD4) <- CD4$RNA_snn_res.0.2
+DimPlot(CD4,label = T)
+DotPlot(CD4,features = c("Cd3e","Cd8a","Cd4","Foxp3","Gzmb","Gzma","Prf1","Sell","Ccr7","Il1b","Il2ra","Rsad2","Ifitm3","Ifit1","Tyrobp","Ncr1","Klrb1c","Ncam1","Fcgr3","Xcl1","Cx3cr1","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+```
+
+```{r}
+Idents(CD4) <- CD4$RNA_snn_res.0.2
+DimPlot(CD4,label = T)
+DotPlot(CD4,features = c("Cd3e","Cd4","Foxp3","Sell","Ccr7","Egr1", "Nkg7", "Ccl5", "Rpl24", "Slamf6", "Klf2", "Cxcr6","Ccr8","Il1b","Il2ra","Rsad2","Ifitm3","Ifit1","Xcl1","Cx3cr1","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+```
+
+```{r}
+Idents(CD4) <- CD4$RNA_snn_res.0.2
+DimPlot(CD4,label = T)
+DotPlot(CD4,features = c("Cd3e","Cd4","Foxp3","Tgfb1","Sell","Ccr7","Tnf","Il2","Ifng","Il4","Il13","Il10","Il17a","Il17f","Il22","Il21"))+RotatedAxis()
+```
+
+```{r}
+CD4@meta.data <- CD4@meta.data %>%
+  mutate(annotation_prelim = case_match(
+    as.character(RNA_snn_res.0.2),
+    "0" ~ "CD4T 1",
+    "1" ~ "IFN-responsive CD4T",
+    "2" ~ "Treg",
+    "3" ~ "Naive CD4T",
+    "4" ~ "CD4T 2",
+    "5" ~ "CD4T 3"
+  ))
+```
+
+```{r}
+CD4$celltype <- rep("CD4T",nrow(CD4@meta.data))
+```
+
+```{r}
+save(CD4,file = paste0(outdir,"lymphoid_convT_CD4_V2p1.Robj"))
+```
+
+move on to CD8
+
+```{r}
+CD8 <- merge(CD8,CD8_small)
+```
+
+```{r}
+CD8 <- NormalizeData(object = CD8, normalization.method = "LogNormalize", scale.factor = 10000)
+CD8 <- FindVariableFeatures(object = CD8, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD8) <-  VariableFeatures(CD8) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(CD8))]
+VariableFeaturePlot(CD8)
+CD8 <- ScaleData(object = CD8, features = VariableFeatures(object = CD8), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD8 <- RunPCA(object = CD8,
+                features =  VariableFeatures(object = CD8),
+                dims = 1:50)
+gc()
+ElbowPlot(CD8,ndims = 50)
+CD8 <- RunHarmony(object = CD8, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD8 <- RunUMAP(CD8,dims = 1:20,reduction = "harmony")
+CD8 <- RunTSNE(CD8,dims = 1:20,reduction = "harmony")
+
+CD8 <- FindNeighbors(CD8, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1.0, 0.1))  {   
+  CD8 <- FindClusters(object = CD8, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+CD8 <- JoinLayers(CD8)
+#save(CD8,file = paste0(outdir,"lymphoid_convT_CD8_V2p1.Robj"))
+```
+
+```{r}
+Idents(CD8) <- CD8$RNA_snn_res.1
+DimPlot(CD8,label = T)
+DotPlot(CD8,features = c("Cd3e","Cd8a","Cd4","Foxp3","Gzmb","Gzma","Prf1","Sell","Ccr7","Il1b","Il2ra","Rsad2","Ifitm3","Ifit1","Tyrobp","Ncr1","Klrb1c","Ncam1","Fcgr3","Xcl1","Cx3cr1","Gata3","Il7r","Rorc","Mki67"))+RotatedAxis()
+```
+
+```{r}
+Idents(CD8) <- CD8$RNA_snn_res.0.3
+DimPlot(CD8,label = T)
+DotPlot(CD8,features = c("Cd3e","Cd8a","Cd69","Cxcr3","Il7r","Cd27","Nkg7","Gzmb","Prf1","Sell","Ccr7","Pdcd1","Tigit","Tox","Tcf7","Il2ra","Rsad2","Ifitm3","Ifit1","Il4","Tyrobp","Ncr1","Klrb1c","Tbx21","Gata3","Irf4","Mki67"))+RotatedAxis()
+```
+
+```{r}
+FeaturePlot(CD8,features = "Ncr1",label = T)
+FeaturePlot(CD8,features = "Klrb1c",label = T)
+FeaturePlot(CD8,features = "Cd8a",label = T)
+```
+
+```{r}
+CD8@meta.data <- CD8@meta.data %>%
+  mutate(annotation_prelim = case_match(
+    as.character(RNA_snn_res.0.3),
+    "0" ~ "Tex",
+    "1" ~ "Klrb1c+ Tex",
+    "2" ~ "Teff",
+    "3" ~ "Naive CD8T",
+    "4" ~ "Tem/ex",
+    "5" ~ "Trm",
+    "6" ~ "Proliferating T"
+  ),
+  celltype = case_match(
+    as.character(RNA_snn_res.0.3),
+    "0" ~ "CD8T",
+    "1" ~ "CD8T",
+    "2" ~ "CD8T",
+    "3" ~ "CD8T",
+    "4" ~ "CD8T",
+    "5" ~ "CD8T",
+    "6" ~ "Proliferating T"
+  ))
+```
+
+```{r}
+table(CD8$annotation_prelim)
+```
+
+```{r}
+save(CD8,file = paste0(outdir,"lymphoid_convT_CD8_V2p1.Robj"))
+```
+
+#### merge back conventional T cells
+
+```{r}
+convT <- merge(CD8,y= c(CD4,prolif))
+```
+
+```{r}
+table(convT$celltype)
+```
+
+```{r}
+convT <- NormalizeData(object = convT, normalization.method = "LogNormalize", scale.factor = 10000)
+convT <- FindVariableFeatures(object = convT, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(convT) <-  VariableFeatures(convT) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(convT))]
+VariableFeaturePlot(convT)
+convT <- ScaleData(object = convT, features = VariableFeatures(object = convT), vars.to.regress = c("nCount_RNA", "percent.mt"))
+convT <- RunPCA(object = convT,
+                features =  VariableFeatures(object = convT),
+                dims = 1:50)
+gc()
+ElbowPlot(convT,ndims = 50)
+convT <- RunHarmony(object = convT, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+convT <- RunUMAP(convT,dims = 1:30,reduction = "harmony")
+convT <- RunTSNE(convT,dims = 1:30,reduction = "harmony")
+
+convT <- FindNeighbors(convT, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1.0, 0.1))  {   
+  convT <- FindClusters(object = convT, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+
+```
+
+```{r}
+convT <- JoinLayers(convT)
+```
+
+```{r}
+save(convT,file = paste0(outdir,"lymphoid_convT_V2p1_merged.Robj"))
+```
+
+```{r}
+DimPlot(convT,group.by = "annotation_prelim")
+DimPlot(convT,group.by = "celltype")
+```
+
+```{r}
+table(convT$celltype)
+table(convT$annotation_prelim)
+```
+
+### merge back lymphoid
+
+```{r}
+lymphoid <- merge(convT,non_convT)
+```
+
+```{r}
+lymphoid <- NormalizeData(object = lymphoid, normalization.method = "LogNormalize", scale.factor = 10000)
+lymphoid <- FindVariableFeatures(object = lymphoid, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(lymphoid) <-  VariableFeatures(lymphoid) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(lymphoid))]
+VariableFeaturePlot(lymphoid)
+lymphoid <- ScaleData(object = lymphoid, features = VariableFeatures(object = lymphoid), vars.to.regress = c("nCount_RNA", "percent.mt"))
+lymphoid <- RunPCA(object = lymphoid,
+                features =  VariableFeatures(object = lymphoid),
+                dims = 1:50)
+gc()
+ElbowPlot(lymphoid,ndims = 50)
+lymphoid <- RunHarmony(object = lymphoid, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+
+```
+
+```{r}
+lymphoid <- RunUMAP(lymphoid,dims = 1:40,reduction = "harmony")
+lymphoid <- RunTSNE(lymphoid,dims = 1:40,reduction = "harmony")
+
+lymphoid <- FindNeighbors(lymphoid, dims = 1:40,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  lymphoid <- FindClusters(object = lymphoid, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+lymphoid <- JoinLayers(lymphoid)
+```
+
+```{r}
+DimPlot(lymphoid,group.by = "annotation_prelim")
+DimPlot(lymphoid,group.by = "celltype")
+```
+
+```{r}
+save(lymphoid,file = paste0(outdir,"lymphoid_V2p1_merged.Robj"))
+```
+
+### merge back whole
+
+```{r}
+load(paste0(outdir,"non_lymphoid_V2p1.Robj"))
+```
+
+```{r}
+DimPlot(non_lymphoid,label = T)
+```
+
+```{r}
+table(non_lymphoid$RNA_snn_res.0.6)
+```
+
+```{r}
+DotPlot(non_lymphoid,features = c("Cd200r3","Mpo","P2ry12","Cd79a","Cd19"))
+```
+
+```{r}
+non_lymphoid@meta.data <- non_lymphoid@meta.data %>%
+  mutate(annotation_prelim = case_match(
+    as.character(RNA_snn_res.0.6),
+    "6" ~ "B_cell_1",
+    "11" ~ "Microglia_1",
+    "13" ~ "B_cell_2",
+    "14" ~ "Other myeloids",
+    "18" ~ "Microglia_2",
+    "22" ~ "B_cell_3"
+  ),
+  celltype = case_match(
+    as.character(RNA_snn_res.0.6),
+    "6" ~ "myeloid",
+    "11" ~ "myeloid",
+    "13" ~ "myeloid",
+    "14" ~ "myeloid",
+    "18" ~ "myeloid",
+    "22" ~ "myeloid"
+  ))
+```
+
+```{r}
+table(non_lymphoid$celltype)
+```
+
+```{r}
+save(non_lymphoid,file = paste0(outdir,"non_lymphoid_V2p1.Robj"))
+```
+
+```{r}
+whole <- merge(lymphoid,non_lymphoid)
+```
+
+```{r}
+table(whole$celltype)
+```
+
+```{r}
+whole <- NormalizeData(object = whole, normalization.method = "LogNormalize", scale.factor = 10000)
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(whole) <-  VariableFeatures(whole) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(whole))]
+VariableFeaturePlot(whole)
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+
+```
+
+```{r}
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+whole <- RunUMAP(whole,dims = 1:40,reduction = "harmony")
+whole <- RunTSNE(whole,dims = 1:40,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:40,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DimPlot(whole,group.by = "annotation_prelim")
+DimPlot(whole,group.by = "celltype")
+```
+
+```{r}
+n_by_ann <- whole@meta.data %>% group_by(orig.ident,annotation_prelim,celltype) %>%
+  summarise(n_by_annotation_per_sample = n())
+n_by_sample <- whole@meta.data %>% group_by(orig.ident) %>%
+  summarise(n_by_sample = n())
+```
+
+```{r}
+ann_table <- full_join(n_by_ann,n_by_sample,by = "orig.ident")
+```
+
+```{r}
+whole <- JoinLayers(whole)
+save(whole,file = paste0(outdir,"whole_V2p1_merged.Robj"))
+```
+
+```{r}
+sum(ann_table$n.x/ann_table$n.y)
+```
+
+```{r}
+g <- ggplot(ann_table,aes(x = orig.ident, y = n.x*100/n.y,fill = orig.ident))+
+geom_bar(stat = "identity")+
+  facet_wrap(~annotation_prelim,scales = "free") + ylab("% of immune cells") +ggtitle("Proportion of cell types by sample")+RotatedAxis()
+ggsave(filename = "Prop_preliminary_annotation.pdf",plot = g, units = "cm",width = 40,height = 30)
+```
+
+```{r}
+g <- ggplot(ann_table,aes(x = orig.ident, y = n.x*100/n.y,fill = orig.ident))+
+geom_bar(stat = "identity")+
+  facet_wrap(~celltype,scales = "free") + ylab("% of immune cells") +ggtitle("Proportion of cell types by sample")+RotatedAxis()
+ggsave(filename = "Prop_celltype.pdf",plot = g, units = "cm",width = 40,height = 30)
+```
+
+```{r}
+write.table(ann_table,file = "preliminary_compartment_table.tsv",sep = "\t",col.names = T,row.names = F,quote = F)
+```
+
+### merge back labeled vague
+
+4,5,6,7 are proliferating clusters that were merged back. So I'll label rest of clusters after labeling them. (\*cluster 9 is actually a pretty clean Cd4+ cluster, but it being small concerned me some how.)
+
+```{r}
+Idents(vague) <- vague$RNA_snn_res.1
+DimPlot(vague,label = T)
+```
+
+```{r}
+vague_to_merge <- subset(vague, idents = c(0,1,2,3,8,9))
+```
+
+```{r}
+vague_to_merge@meta.data <- vague_to_merge@meta.data %>%
+  mutate(annotation_prelim = case_match(
+    as.character(RNA_snn_res.1),
+    "0" ~ "vague_T_1",
+    "1" ~ "vague_T_2",
+    "2" ~ "vague_T_3",
+    "3" ~ "vague_T_4",
+    "8" ~ "vague_T_5",
+    "9" ~ "vague_CD4"
+  ),
+  celltype = case_match(
+    as.character(RNA_snn_res.1),
+    "0" ~ "T cell",
+    "1" ~ "T cell",
+    "2" ~ "T cell",
+    "3" ~ "T cell",
+    "8" ~ "T cell",
+    "9" ~ "T cell"
+  ))
+```
+
+```{r}
+table(vague_to_merge$annotation_prelim)
+table(vague_to_merge$celltype)
+```
+
+```{r}
+whole <- merge(whole,vague_to_merge)
+```
+
+```{r}
+whole <- NormalizeData(object = whole, normalization.method = "LogNormalize", scale.factor = 10000)
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(whole) <-  VariableFeatures(whole) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(whole))]
+VariableFeaturePlot(whole)
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+whole <- RunUMAP(whole,dims = 1:40,reduction = "harmony")
+whole <- RunTSNE(whole,dims = 1:40,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:40,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+whole <- JoinLayers(whole)
+save(whole,file = paste0(outdir,"whole_V2p1_merged_with_vague.Robj"))
+```
+
+```{r}
+DimPlot(whole,group.by = "annotation_prelim")
+DimPlot(whole,group.by = "celltype")
+```
+
+
+```{r}
+load(paste0(outdir,"whole_V2p1_merged.Robj"))
+```
+
+```{r}
+DimPlot(whole,reduction = "umap")
+```
+
+

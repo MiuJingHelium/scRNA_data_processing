@@ -1,0 +1,338 @@
+---
+title: "T_cell_subtype_isolation"
+output: html_document
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony)
+library(data.table)
+library(SeuratWrappers)
+```
+
+```{r}
+indir = "./R_outs/"
+outdir = "./R_outs/"
+load(paste0(outdir,"T_cells_DF_res06_V2.Robj"))
+```
+
+```{r}
+DimPlot(T_cells_V2)
+```
+```{r}
+FeaturePlot(T_cells_V2,features = c("Cd3e"),label=T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(T_cells_V2,features = c("Cd8a"),label=T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(T_cells_V2,features = c("Cd4"),label=T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(T_cells_V2,features = c("Ncr1"),label=T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(T_cells_V2,features = c("Foxp3"),label=T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(T_cells_V2,features = c("Ccr7"),label=T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(T_cells_V2,features = c("Mki67"),label=T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(T_cells_V2,features = c("Ccl3"),label=T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(T_cells_V2,features = c("Pdcd1"),label=T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(T_cells_V2,features = c("Tyrobp"),label=T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+```
+
+```{r}
+DotPlot(T_cells_V2,features = c("Cd3e","Ncr1","Tyrobp","Xcl1","Cd8a","Cd4","Ccr7","Sell","Ly6c1","Tox","Pdcd1","Il4","Il17a","Itgam","Itgax","Cd7","Gzmb","Cx3cr1","Cd40lg","Bcl3","Foxp3","Slamf6","Isg15","Cd69","Trgv2"))+RotatedAxis()
+```
+
+
+
+```{r}
+DotPlot(T_cells_V2,features = c("Cd3e","Ncr1","Tyrobp","Xcl1","Cd8a","Cd4","Ccr7","Sell","Ly6c1","Tox","Pdcd1","Il4","Il17a","Itgam","Itgax","Cd7","Gzmb","Cx3cr1","Cd40lg","Bcl3","Foxp3","Slamf6","Isg15","Cd69","Trgv2"))+RotatedAxis()
+```
+
+
+
+## First round of isolation
+```{r}
+VlnPlot(T_cells_V2,features = c("Cd4"))
+VlnPlot(T_cells_V2,features = c("Cd8a"))
+VlnPlot(T_cells_V2,features = c("Ncr1"))
+```
+Cd4 high clusters: 1,12,13
+Cd8 high clusters: 0,2,3,5,10,15,17,18
+
+We will see if we will isolate Cd4 and Cd8 high 
+
+```{r}
+CD4 <- subset(T_cells_V2,ident = c(1,12,13))
+
+CD8 <- subset(T_cells_V2,ident = c(0,2,3,5,10,15,17,18))
+```
+
+```{r}
+DimPlot(CD4)
+DimPlot(CD8)
+```
+### Start with CD8
+
+```{r}
+CD8 <- FindVariableFeatures(object = CD8, selection.method = 'mean.var.plot', mean.cutoff = c(0.05, 5), dispersion.cutoff = c(0.55, Inf))
+VariableFeatures(CD8) <-  VariableFeatures(CD8)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(CD8))]
+VariableFeaturePlot(CD8)
+
+CD8 <- ScaleData(object = CD8, features = VariableFeatures(object = CD8), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD8 <- RunPCA(object = CD8,
+                features =  VariableFeatures(object = CD8),
+                dims = 1:50)
+gc()
+```
+
+```{r}
+ElbowPlot(CD8,ndims = 50)
+```
+
+```{r}
+
+CD8 <- RunHarmony(object = CD8, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD8 <- RunUMAP(CD8,dims = 1:20,reduction = "harmony")
+CD8 <- RunTSNE(CD8,dims = 1:20,reduction = "harmony")
+
+CD8 <- FindNeighbors(CD8, dims = 1:20,reduction = "harmony")
+
+CD8 <- FindClusters(object = CD8, resolution = 1)
+
+gc()
+```
+```{r}
+FeaturePlot(CD8,features="Cd8a",label=T)
+FeaturePlot(CD8,features="Cd4",label=T)
+```
+
+```{r}
+DotPlot(CD8,features = c("Cd8a","Cd4","Ncr1"))+RotatedAxis()
+```
+Remove 8 and 10.Isolate 1 and 5 as Vague
+
+```{r}
+Vague_CD8 <- subset(CD8, idents = c(1,5))
+CD8 <- subset(CD8, idents = c(0,2:4,6,7,9,11,12))
+```
+
+
+### CD4
+
+```{r}
+CD4 <- FindVariableFeatures(object = CD4, selection.method = 'mean.var.plot', mean.cutoff = c(0.05, 5), dispersion.cutoff = c(0.55, Inf))
+VariableFeatures(CD4) <-  VariableFeatures(CD4)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(CD4))]
+VariableFeaturePlot(CD4)
+
+CD4 <- ScaleData(object = CD4, features = VariableFeatures(object = CD4), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD4 <- RunPCA(object = CD4,
+                features =  VariableFeatures(object = CD4),
+                dims = 1:50)
+gc()
+
+ElbowPlot(CD4,ndims = 50)
+```
+```{r}
+CD4 <- RunHarmony(object = CD4, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD4 <- RunUMAP(CD4,dims = 1:10,reduction = "harmony")
+CD4 <- RunTSNE(CD4,dims = 1:10,reduction = "harmony")
+
+CD4 <- FindNeighbors(CD4, dims = 1:10,reduction = "harmony")
+CD4 <- FindClusters(object = CD4, resolution = 1)
+
+```
+
+```{r}
+DotPlot(CD4,features = c("Cd8a","Cd4","Ncr1"))+RotatedAxis()
+```
+```{r}
+FeaturePlot(CD4, features = c("Cd8a"),label = T)
+```
+
+I would consider entire CD4 as vague
+
+```{r}
+#Vague_CD4 <- subset(CD4,idents = 0)
+#CD4 <- subset(CD4, idents = c(1:8))
+```
+
+### merge vague and process
+
+```{r}
+Vague <- merge(CD4,Vague_CD8)
+Vague <- NormalizeData(Vague, assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+Vague  <- FindVariableFeatures(object = Vague, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+VariableFeatures(Vague ) <-  VariableFeatures(Vague)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(Vague))]
+VariableFeaturePlot(Vague)
+
+Vague <- ScaleData(object = Vague, features = VariableFeatures(object = Vague), vars.to.regress = c("nCount_RNA", "percent.mt"))
+Vague <- RunPCA(object = Vague,
+                features =  VariableFeatures(object = Vague),
+                dims = 1:50)
+gc()
+ElbowPlot(Vague,ndims = 50)
+Vague <- RunHarmony(object = Vague, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+Vague <- RunUMAP(Vague,dims = 1:10,reduction = "harmony")
+Vague <- RunTSNE(Vague,dims = 1:10,reduction = "harmony")
+
+Vague <- FindNeighbors(Vague, dims = 1:10,reduction = "harmony")
+Vague <- FindClusters(object = Vague, resolution = 1)
+
+gc()
+```
+
+
+```{r}
+DotPlot(Vague,features = c("Cd8a","Cd4","Ncr1"))+RotatedAxis()
+```
+
+isolate and merge back to CD8: 0,2,9
+isolate as CD4: 1:6,8
+
+```{r}
+CD8_small <- subset(Vague, idents = c(0,2,9))
+CD4 <- subset(Vague, idents = c(1:6,8))
+```
+
+## Second round: merge back to main object and re-process
+
+```{r}
+CD8 <- merge(CD8,CD8_small)
+
+```
+
+
+
+### CD8
+
+```{r}
+CD8 <- NormalizeData(CD8, assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+CD8 <- FindVariableFeatures(object = CD8, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+VariableFeatures(CD8) <-  VariableFeatures(CD8)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(CD8))]
+VariableFeaturePlot(CD8)
+
+CD8 <- ScaleData(object = CD8, features = VariableFeatures(object = CD8), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD8 <- RunPCA(object = CD8,
+                features =  VariableFeatures(object = CD8),
+                dims = 1:50)
+gc()
+ElbowPlot(CD8,ndims = 50)
+
+```
+
+```{r}
+CD8 <- RunHarmony(object = CD8, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD8 <- RunUMAP(CD8,dims = 1:10,reduction = "harmony")
+CD8 <- RunTSNE(CD8,dims = 1:10,reduction = "harmony")
+
+CD8 <- FindNeighbors(CD8, dims = 1:10,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  CD8 <- FindClusters(object = CD8, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DotPlot(CD8,features = c("Cd8a","Cd4","Ncr1"))+RotatedAxis()
+```
+
+```{r}
+CD4_small <- subset(CD8, idents = c(9,10))
+```
+
+
+```{r}
+FeaturePlot(CD8,features = c("Cd4","Cd8a"),label = T)
+FeaturePlot(CD8,features = c("Cd8a","Ncr1"),label = T)
+```
+```{r}
+FeaturePlot(CD8,features = c("Cd8a","Trdv1"),label = T)
+```
+
+```{r}
+CD8 <- subset(CD8, idents = c(0:8,11:12))
+```
+
+```{r}
+CD8 <- NormalizeData(CD8, assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+CD8 <- FindVariableFeatures(object = CD8, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+VariableFeatures(CD8) <-  VariableFeatures(CD8)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(CD8))]
+VariableFeaturePlot(CD8)
+
+CD8 <- ScaleData(object = CD8, features = VariableFeatures(object = CD8), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD8 <- RunPCA(object = CD8,
+                features =  VariableFeatures(object = CD8),
+                dims = 1:50)
+gc()
+ElbowPlot(CD8,ndims = 50)
+
+CD8 <- RunHarmony(object = CD8, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD8 <- RunUMAP(CD8,dims = 1:10,reduction = "harmony")
+CD8 <- RunTSNE(CD8,dims = 1:10,reduction = "harmony")
+
+CD8 <- FindNeighbors(CD8, dims = 1:10,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  CD8 <- FindClusters(object = CD8, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+FeaturePlot(CD8,features = c("Cd4","Cd8a"),label = T)
+FeaturePlot(CD8,features = c("Cd8a","Ncr1"),label = T)
+```
+```{r}
+DotPlot(CD8,features = c("Cd8a","Cd4","Ncr1"))+RotatedAxis()
+```
+
+```{r}
+save(CD8,file=paste0(outdir,"CD8_V1.Robj"))
+```
+
+### CD4
+
+```{r}
+CD4 <- NormalizeData(CD4, assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+CD4 <- FindVariableFeatures(object = CD4, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+VariableFeatures(CD4) <-  VariableFeatures(CD4)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(CD4))]
+VariableFeaturePlot(CD4)
+
+CD4 <- ScaleData(object = CD4, features = VariableFeatures(object = CD4), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD4 <- RunPCA(object = CD4,
+                features =  VariableFeatures(object = CD4),
+                dims = 1:50)
+gc()
+ElbowPlot(CD4,ndims = 50)
+```
+
+```{r}
+CD4 <- RunHarmony(object = CD4, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD4 <- RunUMAP(CD4,dims = 1:10,reduction = "harmony")
+CD4 <- RunTSNE(CD4,dims = 1:10,reduction = "harmony")
+
+CD4 <- FindNeighbors(CD4, dims = 1:10,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  CD4 <- FindClusters(object = CD4, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DotPlot(CD4,features = c("Cd8a","Cd4","Ncr1"))+RotatedAxis()
+```
+Isolate 2, 8 and merge back to CD8
+
+```{r}
+CD8_small <- subset(CD4,idents = c(2,8))
+```
+
+```{r}
+CD4 <- subset(CD4, idents = c(0:1,3:7,9:11))
+```
+
+prepare for third round:
+```{r}
+CD8 <- merge(x=CD8,y=CD8_small)
+```
+
+```{r}
+CD4 <- merge(x=CD4,y=CD4_small)
+```
+
+###
+

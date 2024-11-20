@@ -1,0 +1,771 @@
+---
+title: "0-6_subpop_isolation"
+output: html_document
+date: "2024-10-22"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony) # for integration
+```
+
+```{r}
+RDSdir <- "RDS/"
+outdir <- "R_outs/"
+```
+
+
+```{r}
+library(RColorBrewer)
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+```
+
+```{r}
+load(file = paste0(RDSdir,"T_cells_V1p5.Robj"))
+```
+
+```{r}
+DimPlot(T_cells,label = T)
+DimPlot(T_cells, group.by = "orig.ident")
+FeaturePlot(T_cells, features = "Cd4",label = T)
+FeaturePlot(T_cells, features = "Cd8a",label = T)
+```
+
+```{r}
+DotPlot(T_cells,features = c("Cd3e","Cd4","Cd8a","Mki67"),cluster.idents = T,group.by = "RNA_snn_res.1") # Idents(obj) used by lasted generated resolution by default
+```
+
+### Round 1:
+
+First divide clusters based on the dominant subpopulation:
+CD4: 23,11,19,8,18,4,17
+CD8: 15,10,13,9,3,21,2,14,1,16,6,0,5
+DN: 22, 20, 12, 7
+
+Some clusters aren't true DN.
+
+```{r}
+cd4_clust <- c(23,11,19,8,18,4,17)
+cd8_clust <- c(15,10,13,9,3,21,2,14,1,16,6,0,5)
+dn_clust <- c(22, 20, 12, 7)
+sum(c(cd4_clust,cd8_clust,dn_clust) %in% 0:23) # should add up to 24 clusters
+```
+
+```{r}
+CD4 <- subset(T_cells, idents = cd4_clust)
+CD8 <- subset(T_cells, idents = cd8_clust)
+DN <- subset(T_cells, idents = dn_clust)
+```
+
+#### CD4 Round 1
+
+```{r}
+CD4 <- FindVariableFeatures(object = CD4, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD4) <-  VariableFeatures(CD4) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(CD4))]
+VariableFeaturePlot(CD4)
+
+CD4 <- ScaleData(object = CD4, features = VariableFeatures(object = CD4), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+CD4 <- RunPCA(object = CD4,
+                features =  VariableFeatures(object = CD4),
+                dims = 1:50)
+gc()
+ElbowPlot(CD4,ndims = 50)
+```
+
+```{r}
+CD4 <- RunHarmony(object = CD4, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD4 <- RunUMAP(CD4,dims = 1:25,reduction = "harmony") # use harmony embedding for downstream analysis
+CD4 <- RunTSNE(CD4,dims = 1:25,reduction = "harmony")
+
+CD4 <- FindNeighbors(CD4, dims = 1:25,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  CD4 <- FindClusters(object = CD4, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+CD4 <- JoinLayers(CD4) # required for seurat V5
+```
+
+```{r}
+DotPlot(CD4,features = c("Cd3e","Cd4","Cd8a","Ccr7","Sell","Sox4","Isg15","Pdcd1"),cluster.idents = T)
+```
+
+```{r}
+FeaturePlot(CD4, features = "Cd4",label = T)
+FeaturePlot(CD4, features = "Cd8a",label = T)
+```
+
+
+```{r}
+CD8.s <- subset(CD4,idents = c(4,8,10,11,12))
+```
+
+```{r}
+CD4 <- subset(CD4, idents = c(0:13)[!(c(0:13) %in% c(4,10,8,11,12))])  
+```
+
+```{r}
+DimPlot(CD8.s)
+DimPlot(CD4)
+```
+
+
+#### CD8 Round 1
+
+```{r}
+CD8 <- FindVariableFeatures(object = CD8, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD8) <-  VariableFeatures(CD8) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(CD8))]
+VariableFeaturePlot(CD8)
+
+CD8 <- ScaleData(object = CD8, features = VariableFeatures(object = CD8), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+CD8 <- RunPCA(object = CD8,
+                features =  VariableFeatures(object = CD8),
+                dims = 1:50)
+gc()
+ElbowPlot(CD8,ndims = 50)
+```
+
+```{r}
+CD8 <- RunHarmony(object = CD8, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD8 <- RunUMAP(CD8,dims = 1:30,reduction = "harmony") # use harmony embedding for downstream analysis
+CD8 <- RunTSNE(CD8,dims = 1:30,reduction = "harmony")
+
+CD8 <- FindNeighbors(CD8, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  CD8 <- FindClusters(object = CD8, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+CD8 <- JoinLayers(CD8) # required for seurat V5
+```
+
+```{r}
+DotPlot(CD8,features = c("Cd3e","Cd4","Cd8a","Ccr7","Sell","Sox4"),cluster.idents = T)
+```
+
+
+#### DN Round 1
+
+```{r}
+DN <- FindVariableFeatures(object = DN, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(DN) <-  VariableFeatures(DN) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(DN))]
+VariableFeaturePlot(DN)
+
+DN <- ScaleData(object = DN, features = VariableFeatures(object = DN), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+DN <- RunPCA(object = DN,
+                features =  VariableFeatures(object = DN),
+                dims = 1:50)
+gc()
+ElbowPlot(DN,ndims = 50)
+```
+
+```{r}
+DN <- RunHarmony(object = DN, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+DN <- RunUMAP(DN,dims = 1:10,reduction = "harmony") # use harmony embedding for downstream analysis
+DN <- RunTSNE(DN,dims = 1:10,reduction = "harmony")
+
+DN <- FindNeighbors(DN, dims = 1:10,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  DN <- FindClusters(object = DN, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+DN <- JoinLayers(DN) # required for seurat V5
+```
+
+```{r}
+DotPlot(DN,features = c("Cd3e","Cd4","Cd8a","Ccr7","Sell","Sox4"),cluster.idents = T)
+```
+
+```{r}
+FeaturePlot(DN, features = "Cd3e")
+FeaturePlot(DN, features = "Cd4",label = T)
+FeaturePlot(DN, features = "Cd8a",label = T)
+```
+
+```{r}
+CD8.s2 <- subset(DN,idents = c(7,10))
+```
+
+```{r}
+DN <- subset(DN, idents = c(0:10)[!(c(0:10) %in% c(7,10))])
+```
+
+```{r}
+DimPlot(CD8.s2)
+DimPlot(DN)
+```
+
+### Round 2
+
+#### start with CD8 (hopefully some CD4 will be isolated)
+
+```{r}
+CD8 <- merge(CD8,y = c(CD8.s, CD8.s2))
+```
+
+```{r}
+CD8 <- NormalizeData(object = CD8, normalization.method = "LogNormalize", scale.factor = 10000)
+CD8 <- FindVariableFeatures(object = CD8, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD8) <-  VariableFeatures(CD8) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(CD8))]
+VariableFeaturePlot(CD8)
+
+CD8 <- ScaleData(object = CD8, features = VariableFeatures(object = CD8), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+CD8 <- RunPCA(object = CD8,
+                features =  VariableFeatures(object = CD8),
+                dims = 1:50)
+gc()
+ElbowPlot(CD8,ndims = 50)
+```
+
+```{r}
+CD8 <- RunHarmony(object = CD8, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD8 <- RunUMAP(CD8,dims = 1:30,reduction = "harmony") # use harmony embedding for downstream analysis
+CD8 <- RunTSNE(CD8,dims = 1:30,reduction = "harmony")
+
+CD8 <- FindNeighbors(CD8, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  CD8 <- FindClusters(object = CD8, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+CD8 <- JoinLayers(CD8) # required for seurat V5
+```
+
+```{r}
+DotPlot(CD8,features = c("Cd3e","Cd4","Cd8a","Ccr7","Sell","Sox4"),cluster.idents = T)
+```
+
+```{r}
+FeaturePlot(CD8, features = "Cd4",label = T)
+FeaturePlot(CD8, features = "Cd8a",label = T)
+```
+
+```{r}
+CD4.s <- subset(CD8, idents = c(16,19))
+CD8 <- subset(CD8, idents = c(0:19)[!(c(0:19) %in% c(16,19))])
+```
+
+```{r}
+FeaturePlot(CD8, features = "Cd4",label = T)
+FeaturePlot(CD8, features = "Cd8a",label = T)
+```
+
+
+#### CD4 round 2
+
+```{r}
+CD4 <- merge(CD4, CD4.s)
+```
+
+```{r}
+CD4 <- NormalizeData(object = CD4, normalization.method = "LogNormalize", scale.factor = 10000)
+CD4 <- FindVariableFeatures(object = CD4, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD4) <-  VariableFeatures(CD4) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(CD4))]
+VariableFeaturePlot(CD4)
+
+CD4 <- ScaleData(object = CD4, features = VariableFeatures(object = CD4), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+CD4 <- RunPCA(object = CD4,
+                features =  VariableFeatures(object = CD4),
+                dims = 1:50)
+gc()
+ElbowPlot(CD4,ndims = 50)
+```
+
+
+```{r}
+CD4 <- RunHarmony(object = CD4, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD4 <- RunUMAP(CD4,dims = 1:20,reduction = "harmony") # use harmony embedding for downstream analysis
+CD4 <- RunTSNE(CD4,dims = 1:20,reduction = "harmony")
+
+CD4 <- FindNeighbors(CD4, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  CD4 <- FindClusters(object = CD4, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+CD4 <- JoinLayers(CD4) # required for seurat V5
+```
+
+```{r}
+DotPlot(CD4,features = c("Cd3e","Cd4","Cd8a","Ccr7","Sell","Sox4"),cluster.idents = T)
+```
+
+```{r}
+FeaturePlot(CD4, features = "Cd4",label = T)
+FeaturePlot(CD4, features = "Cd8a",label = T)
+DimPlot(CD4)
+```
+Need to subset c6 and c9 for direct clustering
+
+```{r}
+mix <- subset(CD4, idents = c(6,9))
+CD4 <- subset(CD4, idents = c(0:11)[!(c(0:11) %in% c(6,9))])
+```
+
+```{r}
+FeaturePlot(CD4, features = "Cd4",label = T)
+FeaturePlot(CD4, features = "Cd8a",label = T)
+```
+
+#### DN Round 2
+
+```{r}
+DN <- FindVariableFeatures(object = DN, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(DN) <-  VariableFeatures(DN) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(DN))]
+VariableFeaturePlot(DN)
+
+DN <- ScaleData(object = DN, features = VariableFeatures(object = DN), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+DN <- RunPCA(object = DN,
+                features =  VariableFeatures(object = DN),
+                dims = 1:50)
+gc()
+ElbowPlot(DN,ndims = 50)
+```
+
+```{r}
+DN <- RunHarmony(object = DN, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+DN <- RunUMAP(DN,dims = 1:10,reduction = "harmony") # use harmony embedding for downstream analysis
+DN <- RunTSNE(DN,dims = 1:10,reduction = "harmony")
+
+DN <- FindNeighbors(DN, dims = 1:10,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  DN <- FindClusters(object = DN, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+DN <- JoinLayers(DN) # required for seurat V5
+```
+
+```{r}
+DotPlot(DN,features = c("Cd3e","Cd4","Cd8a","Ccr7","Sell","Sox4"),cluster.idents = T)
+```
+```{r}
+FeaturePlot(DN,features = "Cd8a")
+FeaturePlot(DN,features = "Cd4")
+DimPlot(DN, group.by = "genotype")
+DimPlot(DN)
+```
+
+
+```{r eval=FALSE}
+save(DN,file = paste0(RDSdir,"T_cells_V1p5_DN.Robj"))
+```
+
+### Round 3
+
+#### Try to isolate remaining CD8 from CD4
+
+```{r}
+CD4 <- NormalizeData(object = CD4, normalization.method = "LogNormalize", scale.factor = 10000)
+CD4 <- FindVariableFeatures(object = CD4, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD4) <-  VariableFeatures(CD4) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(CD4))]
+VariableFeaturePlot(CD4)
+
+CD4 <- ScaleData(object = CD4, features = VariableFeatures(object = CD4), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+CD4 <- RunPCA(object = CD4,
+                features =  VariableFeatures(object = CD4),
+                dims = 1:50)
+gc()
+ElbowPlot(CD4,ndims = 50)
+```
+
+
+```{r}
+CD4 <- RunHarmony(object = CD4, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD4 <- RunUMAP(CD4,dims = 1:20,reduction = "harmony") # use harmony embedding for downstream analysis
+CD4 <- RunTSNE(CD4,dims = 1:20,reduction = "harmony")
+
+CD4 <- FindNeighbors(CD4, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  CD4 <- FindClusters(object = CD4, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+CD4 <- JoinLayers(CD4) # required for seurat V5
+```
+
+```{r}
+DotPlot(CD4,features = c("Cd3e","Cd4","Cd8a","Ccr7","Sell","Sox4"),cluster.idents = T)
+```
+
+```{r}
+FeaturePlot(CD4, features = "Cd4",label = T)
+FeaturePlot(CD4, features = "Cd8a",label = T)
+```
+isolate c6 for mixture
+
+```{r}
+mix.s <- subset(CD4, idents = 6)
+CD4 <- subset(CD4, idents = c(0:9)[!(c(0:9) %in% c(6))])
+```
+
+```{r}
+FeaturePlot(CD4, features = "Cd8a",label = T)
+```
+
+```{r}
+CD4 <- NormalizeData(object = CD4, normalization.method = "LogNormalize", scale.factor = 10000)
+CD4 <- FindVariableFeatures(object = CD4, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD4) <-  VariableFeatures(CD4) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(CD4))]
+VariableFeaturePlot(CD4)
+
+CD4 <- ScaleData(object = CD4, features = VariableFeatures(object = CD4), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+CD4 <- RunPCA(object = CD4,
+                features =  VariableFeatures(object = CD4),
+                dims = 1:50)
+gc()
+ElbowPlot(CD4,ndims = 50)
+```
+
+```{r}
+CD4 <- RunHarmony(object = CD4, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD4 <- RunUMAP(CD4,dims = 1:20,reduction = "harmony") # use harmony embedding for downstream analysis
+CD4 <- RunTSNE(CD4,dims = 1:20,reduction = "harmony")
+
+CD4 <- FindNeighbors(CD4, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  CD4 <- FindClusters(object = CD4, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+CD4 <- JoinLayers(CD4) # required for seurat V5
+```
+
+```{r}
+DotPlot(CD4,features = c("Cd3e","Cd4","Cd8a","Ccr7","Sell","Sox4","Mki67"),cluster.idents = T)
+```
+```{r}
+FeaturePlot(CD4, features = "Cd8a",label = T)
+FeaturePlot(CD4, features = "Cd4",label = T)
+```
+```{r eval=FALSE}
+save(CD4,file = paste0(RDSdir,"T_cells_V1p5_CD4.Robj"))
+```
+
+
+
+#### check CD4 isolated mixture
+
+```{r}
+mix <- merge(mix, mix.s)
+```
+
+
+```{r}
+mix <- NormalizeData(object = mix, normalization.method = "LogNormalize", scale.factor = 10000)
+mix <- FindVariableFeatures(object = mix, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(mix) <-  VariableFeatures(mix) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(mix))]
+VariableFeaturePlot(mix)
+
+mix <- ScaleData(object = mix, features = VariableFeatures(object = mix), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+mix <- RunPCA(object = mix,
+                features =  VariableFeatures(object = mix),
+                dims = 1:50)
+gc()
+ElbowPlot(mix,ndims = 50)
+```
+
+```{r}
+mix <- RunHarmony(object = mix, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+mix <- RunUMAP(mix,dims = 1:20,reduction = "harmony") # use harmony embedding for downstream analysis
+mix <- RunTSNE(mix,dims = 1:20,reduction = "harmony")
+
+mix <- FindNeighbors(mix, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  mix <- FindClusters(object = mix, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+mix <- JoinLayers(mix) # required for seurat V5
+```
+
+```{r}
+FeaturePlot(mix, features = "Cd8a",label = T)
+FeaturePlot(mix, features = "Cd4",label = T)
+FeaturePlot(mix, features = "Mki67",label = T)
+DimPlot(mix)
+```
+```{r}
+DimPlot(mix,group.by = "RNA_snn_res.0.5")
+DotPlot(mix,features = c("Cd3e","Cd4","Cd8a","Ccr7","Sell","Sox4","Mki67","Pdcd1","Isg15"),cluster.idents = T,group.by = "RNA_snn_res.0.5")
+```
+
+Still hard to separate CD4 and CD8; cells are non-proliferating; these cells were isolated from CD4
+
+```{r}
+hist(mix$log10_nCount_RNA)
+hist(CD8$log10_nCount_RNA)
+hist(CD4$log10_nCount_RNA)
+
+# range looks valid; probably just co-clustered cells.
+```
+
+#### merge mix with CD8 again
+
+```{r}
+CD8 <- merge(CD8, mix)
+```
+
+```{r}
+CD8 <- NormalizeData(object = CD8, normalization.method = "LogNormalize", scale.factor = 10000)
+CD8 <- FindVariableFeatures(object = CD8, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD8) <-  VariableFeatures(CD8) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(CD8))]
+VariableFeaturePlot(CD8)
+
+CD8 <- ScaleData(object = CD8, features = VariableFeatures(object = CD8), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+CD8 <- RunPCA(object = CD8,
+                features =  VariableFeatures(object = CD8),
+                dims = 1:50)
+gc()
+ElbowPlot(CD8,ndims = 50)
+```
+
+```{r}
+CD8 <- RunHarmony(object = CD8, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD8 <- RunUMAP(CD8,dims = 1:30,reduction = "harmony") # use harmony embedding for downstream analysis
+CD8 <- RunTSNE(CD8,dims = 1:30,reduction = "harmony")
+
+CD8 <- FindNeighbors(CD8, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  CD8 <- FindClusters(object = CD8, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+CD8 <- JoinLayers(CD8) # required for seurat V5
+```
+
+```{r}
+DotPlot(CD8,features = c("Cd3e","Cd4","Cd8a","Ccr7","Sell","Sox4"),cluster.idents = T,group.by = "RNA_snn_res.0.8")
+```
+
+```{r}
+Idents(CD8) <- "RNA_snn_res.0.8"
+FeaturePlot(CD8, features = "Cd8a",label = T)
+FeaturePlot(CD8, features = "Cd4", label = T,order = T)
+
+```
+
+```{r}
+FeaturePlot(CD8, features = "nFeature_RNA", label = T,order = T)
+```
+
+isolate c8 at res0.8 and merge back to CD4
+
+```{r}
+CD4.s <- subset(CD8, idents =  8)
+CD8 <- subset(CD8,idents = c(0:16)[!(c(0:16) %in% c(8))])
+
+```
+
+
+```{r}
+FeaturePlot(CD8, features = "Cd8a",label = T)
+FeaturePlot(CD8, features = "Cd4", label = T,order = T)
+FeaturePlot(CD4.s, features = "Cd8a",label = T)
+FeaturePlot(CD4.s, features = "Cd4", label = T,order = T) #These are doublets
+```
+
+```{r}
+CD4.s <- FindVariableFeatures(object = CD4.s, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD4.s) <-  VariableFeatures(CD4.s) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(CD4.s))]
+VariableFeaturePlot(CD4.s)
+
+CD4.s <- ScaleData(object = CD4.s, features = VariableFeatures(object = CD4.s), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+CD4.s <- RunPCA(object = CD4.s,
+                features =  VariableFeatures(object = CD4.s),
+                dims = 1:50)
+gc()
+ElbowPlot(CD4.s,ndims = 50)
+```
+
+```{r}
+CD4.s <- RunHarmony(object = CD4.s, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD4.s <- RunUMAP(CD4.s,dims = 1:30,reduction = "harmony") # use harmony embedding for downstream analysis
+CD4.s <- RunTSNE(CD4.s,dims = 1:30,reduction = "harmony")
+
+CD4.s <- FindNeighbors(CD4.s, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  CD4.s <- FindClusters(object = CD4.s, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+CD4.s <- JoinLayers(CD4.s) # required for seurat V5
+```
+
+```{r}
+FeaturePlot(CD4.s, features = "Cd8a",label = T)
+FeaturePlot(CD4.s, features = "Cd4", label = T,order = T)
+```
+
+```{r}
+save(CD4.s,file = paste0(RDSdir,"T_cells_V1p5_Doub.Robj"))
+```
+
+#### re-process CD8
+
+```{r}
+FeaturePlot(CD8, features = "Cd8a",label = T)
+FeaturePlot(CD8, features = "Cd4", label = T,order = T)
+```
+
+
+```{r}
+CD8 <- NormalizeData(object = CD8, normalization.method = "LogNormalize", scale.factor = 10000)
+CD8 <- FindVariableFeatures(object = CD8, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD8) <-  VariableFeatures(CD8) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(CD8))]
+VariableFeaturePlot(CD8)
+
+CD8 <- ScaleData(object = CD8, features = VariableFeatures(object = CD8), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+CD8 <- RunPCA(object = CD8,
+                features =  VariableFeatures(object = CD8),
+                dims = 1:50)
+gc()
+ElbowPlot(CD8,ndims = 50)
+```
+
+```{r}
+CD8 <- RunHarmony(object = CD8, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD8 <- RunUMAP(CD8,dims = 1:30,reduction = "harmony") # use harmony embedding for downstream analysis
+CD8 <- RunTSNE(CD8,dims = 1:30,reduction = "harmony")
+
+CD8 <- FindNeighbors(CD8, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  CD8 <- FindClusters(object = CD8, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+CD8 <- JoinLayers(CD8) # required for seurat V5
+```
+
+```{r}
+DotPlot(CD8,features = c("Cd3e","Cd4","Cd8a","Ccr7","Sell","Sox4"),cluster.idents = T)
+```
+
+```{r}
+FeaturePlot(CD8,features = "Cd8a",label=T,order = T)
+FeaturePlot(CD8,features = "Cd4",label=T,order = T)
+```
+c14 and 21 are doub like
+
+```{r}
+c14 <- subset(CD8,idents = 14)
+c21 <- subset(CD8,idents = 21)
+```
+
+```{r}
+FeaturePlot(c14,features = "Cd8a",label=T,order = T)
+FeaturePlot(c14,features = "Cd4",label=T,order = T)
+FeaturePlot(c21,features = "Cd8a",label=T,order = T)
+FeaturePlot(c21,features = "Cd4",label=T,order = T)
+```
+```{r}
+Doub <- subset(CD8, idents = c(14,21))
+
+```
+
+```{r eval=FALSE}
+save(Doub,file = paste0(RDSdir,"T_cells_V1p5_Doub_2.Robj"))
+```
+
+```{r}
+CD8 <- NormalizeData(object = CD8, normalization.method = "LogNormalize", scale.factor = 10000)
+CD8 <- FindVariableFeatures(object = CD8, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD8) <-  VariableFeatures(CD8) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(CD8))]
+VariableFeaturePlot(CD8)
+
+CD8 <- ScaleData(object = CD8, features = VariableFeatures(object = CD8), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+CD8 <- RunPCA(object = CD8,
+                features =  VariableFeatures(object = CD8),
+                dims = 1:50)
+gc()
+ElbowPlot(CD8,ndims = 50)
+```
+
+```{r}
+CD8 <- RunHarmony(object = CD8, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD8 <- RunUMAP(CD8,dims = 1:30,reduction = "harmony") # use harmony embedding for downstream analysis
+CD8 <- RunTSNE(CD8,dims = 1:30,reduction = "harmony")
+
+CD8 <- FindNeighbors(CD8, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  CD8 <- FindClusters(object = CD8, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+CD8 <- JoinLayers(CD8) # required for seurat V5
+```
+
+
+
+```{r}
+FeaturePlot(CD8,features = "Cd8a",label=T,order = T)
+FeaturePlot(CD8,features = "Cd4",label=T,order = T)
+```
+```{r eval=FALSE}
+save(CD8, file = paste0(RDSdir,"T_cells_V1p5_CD8_temp.Robj"))
+```
+
+```{r}
+CD8_counts <- CD8[["RNA"]]$counts
+CD8_meta <- CD8[[]]
+```
+
+
+```{r}
+CD8 <- CreateSeuratObject(counts = CD8_counts)
+```
+
+```{r}
+CD8@meta.data <- CD8_meta
+```
+
+```{r}
+table(CD8$RNA_snn_res.1)
+```
+
+
+```{r}
+Idents(CD8) <- "RNA_snn_res.1"
+```
+
+```{r}
+CD8 <- subset(CD8,idents = c(0:21)[!(c(0:21) %in% c(14,21))])
+```
+
+```{r}
+CD8 <- NormalizeData(object = CD8, normalization.method = "LogNormalize", scale.factor = 10000)
+CD8 <- FindVariableFeatures(object = CD8, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD8) <-  VariableFeatures(CD8) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(CD8))]
+VariableFeaturePlot(CD8)
+
+CD8 <- ScaleData(object = CD8, features = VariableFeatures(object = CD8), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+CD8 <- RunPCA(object = CD8,
+                features =  VariableFeatures(object = CD8),
+                dims = 1:50)
+gc()
+ElbowPlot(CD8,ndims = 50)
+```
+
+```{r}
+CD8 <- RunHarmony(object = CD8, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD8 <- RunUMAP(CD8,dims = 1:30,reduction = "harmony") # use harmony embedding for downstream analysis
+CD8 <- RunTSNE(CD8,dims = 1:30,reduction = "harmony")
+
+CD8 <- FindNeighbors(CD8, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  CD8 <- FindClusters(object = CD8, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+CD8 <- JoinLayers(CD8) # required for seurat V5
+```
+
+```{r}
+FeaturePlot(CD8,features = "Cd8a",label=T,order = T)
+FeaturePlot(CD8,features = "Cd4",label=T,order = T)
+FeaturePlot(CD8,features = "Mki67",label=T,order = T)
+FeaturePlot(CD8,features = "Il2ra",label=T,order = T)
+FeaturePlot(CD8,features = "Pdcd1",label=T,order = T)
+```
+
+```{r eval=FALSE}
+save(CD8,file = paste0(RDSdir,"T_cells_V1p5_CD8.Robj"))
+```
+
+

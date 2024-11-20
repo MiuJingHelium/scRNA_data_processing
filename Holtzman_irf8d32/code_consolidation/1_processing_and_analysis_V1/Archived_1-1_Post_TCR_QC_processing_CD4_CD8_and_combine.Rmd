@@ -1,0 +1,63 @@
+---
+title: "Processing TCR QC passed RDS"
+output: html_document
+date: "2024-02-11"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(RColorBrewer)
+```
+
+```{r}
+indir <- "TCR_outs/"
+outdir <- "TCR_processed_dataset/"
+```
+
+```{r}
+load(paste0(indir,"CD8_byTCR_V1.Robj"))
+load(paste0(indir,"CD4_byTCR_V1.Robj"))
+```
+
+process single first
+
+```{r}
+#we don't need to renormalize, but some pacakge will invoke the normalization command :) 
+CD8_byTCR <- NormalizeData(CD8_byTCR,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+CD8_byTCR <- FindVariableFeatures(object = CD8_byTCR, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+VariableFeatures(CD8_byTCR) <-  VariableFeatures(CD8_byTCR)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(CD8_byTCR))]
+VariableFeaturePlot(CD8_byTCR)
+
+CD8_byTCR <- ScaleData(object = CD8_byTCR, features = VariableFeatures(object = CD8_byTCR), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD8_byTCR <- RunPCA(object = CD8_byTCR,
+                features =  VariableFeatures(object = CD8_byTCR),
+                dims = 1:50)
+gc()
+```
+
+```{r}
+ElbowPlot(CD8_byTCR,ndims = 20)
+```
+
+
+```{r}
+CD8_byTCR <- RunHarmony(object = CD8_byTCR, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD8_byTCR <- RunUMAP(CD8_byTCR,dims = 1:15,reduction = "harmony")
+CD8_byTCR <- RunTSNE(CD8_byTCR,dims = 1:15,reduction = "harmony")
+
+CD8_byTCR <- FindNeighbors(CD8_byTCR, dims = 1:15,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  CD8_byTCR <- FindClusters(object = CD8_byTCR, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DimPlot(CD8_byTCR)
+```
+```{r}
+FeaturePlot(CD8_byTCR,features = c("Cd4"))
+FeaturePlot(CD8_byTCR,features = c("Cd8a"))
+```
+

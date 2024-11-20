@@ -105,7 +105,6 @@ write.table(table_res_neu,file = "fgsea_Neutrophils_GSE173569k_consolidated_filt
 ```
 
 
-
 ```{r}
 DE  <- neutrophil_markers %>% filter(p_val_adj < 0.05 & pct.2 < 0.8 & cluster == "Neutrophil_1")  %>% mutate(metric = avg_log2FC) %>% filter(!is.infinite(metric))
 DE <- DE %>% arrange(desc(metric)) %>% select(gene,metric)

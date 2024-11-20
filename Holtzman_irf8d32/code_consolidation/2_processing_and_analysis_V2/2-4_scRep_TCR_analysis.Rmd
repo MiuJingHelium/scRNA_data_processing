@@ -1,0 +1,778 @@
+---
+title: "secondary TCR analysis"
+output: html_document
+date: "2024-03-14"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(scater)
+library(data.table)
+library(RColorBrewer)
+library(gridExtra)
+library(ggrepel)
+library(kableExtra)
+library(scRepertoire)
+library(ggraph)
+library(circlize)
+library(scales)
+```
+
+# Part 1: scRepertoire walk-through
+
+## Only TCR
+
+```{r}
+outdir <- "TCR_outs/"
+```
+
+```{r}
+samples <- list.files(path = "VDJ")
+```
+
+```{r}
+contig_files <- paste("VDJ",samples,"filtered_contig_annotations.csv",sep = "/")
+```
+
+```{r}
+contig_list <- lapply(as.list(contig_files), read.csv)
+names(contig_list) <- samples
+```
+
+```{r}
+combined <- combineTCR(contig_list,
+                        samples = samples)
+```
+
+```{r}
+quantContig(combined,
+            cloneCall="strict",
+            chain = "both",
+            scale = TRUE)
+```
+
+```{r}
+quantContig(combined,
+            cloneCall="gene",
+            chain = "both",
+            scale = TRUE)
+```
+
+```{r}
+quantContig(combined,
+            cloneCall="aa",
+            chain = "both",
+            scale = TRUE)
+```
+
+```{r}
+quantContig(combined,
+            cloneCall="strict",
+            chain = "both",
+            scale = FALSE)
+```
+
+```{r}
+quantContig_out <- quantContig(combined,
+            cloneCall="strict",
+            chain = "both",
+            scale = T,
+            exportTable = TRUE)
+quantContig_out
+```
+
+```{r}
+abundanceContig(combined,
+                cloneCall = "aa",
+                scale = T)
+```
+
+```{r}
+abundanceContig(combined,
+                cloneCall = "aa",
+                scale = F)
+```
+
+```{r}
+lengthContig(combined,
+             cloneCall="aa",
+             chain = "both")
+```
+
+```{r}
+lengthContig(combined,
+             cloneCall="aa",
+             chain = "TRB")
+```
+
+```{r}
+g <- compareClonotypes(combined,
+                  numbers = 10,
+                  samples = samples,
+                  cloneCall="aa",
+                  graph = "alluvial")
+ggsave(filename = paste0(outdir,"compareClonotypes_top10_AA.pdf"),plot = g, units = "cm",width = 40,height = 28)
+```
+
+
+```{r}
+
+compareClonotypes(combined,
+                  numbers = 10,
+                  samples = samples,
+                  cloneCall="gene",
+                  graph = "area")
+```
+
+```{r}
+vizGenes(combined, gene = "V", #gene : V, D, J, C
+         chain = "TRB", # chain: TRA, TRB, TRG, TRD
+         plot = "bar", # plot: bar or heatmap
+         scale = TRUE)
+```
+
+```{r}
+vizGenes(combined[c(2,4)], gene = "V", #gene : V, D, J, C
+         chain = "TRB", # chain: TRA, TRB, TRG, TRD
+         plot = "heatmap", # plot: bar or heatmap
+          y.axis = "J",
+         order = "variance",
+         scale = TRUE)
+```
+
+```{r}
+clonalHomeostasis(combined, cloneCall = "gene")
+```
+
+```{r}
+clonalHomeostasis(combined, cloneCall = "aa")
+```
+
+```{r}
+clonalProportion(combined, cloneCall = "gene")
+```
+```{r}
+clonalOverlap(combined,
+              cloneCall = "gene",
+              method = "jaccard") #  c("overlap", "morisita", "jaccard", "raw")
+```
+
+```{r}
+clonesizeDistribution(combined,
+                      cloneCall = "gene",
+                      method="ward.D2")
+```
+```{r}
+clonalDiversity(combined,
+                cloneCall = "gene",
+                x.axis = "sample")
+```
+
+```{r}
+diversity_out <- clonalDiversity(combined,
+                cloneCall = "gene",
+                group.by = "sample",
+                return.boots = T)
+```
+
+```{r}
+scatterClonotype(combined, cloneCall ="gene",
+                 x.axis = "T-KO",
+                 y.axis = "T-C",
+                 dot.size = "total",
+                 graph = "proportion")
+```
+
+```{r}
+scatterClonotype(combined, cloneCall ="gene",
+                 x.axis = "T-KO",
+                 y.axis = "NT-KO",
+                 dot.size = "total",
+                 graph = "proportion")
+```
+
+## Combine TCR and GEX
+
+### merge with conventional T cells
+
+```{r}
+load("../V2_processing_analysis/R_outs/lymphoid_convT_V2p1_merged.Robj")
+```
+
+```{r}
+DimPlot(convT)
+```
+
+```{r}
+rownames_convT <- rownames(convT@meta.data)
+rownames_convT <- gsub("NT_C","NT-C",rownames_convT)
+rownames_convT <- gsub("T_C","T-C",rownames_convT)
+rownames_convT <- gsub("NT_KO","NT-KO",rownames_convT)
+rownames_convT <- gsub("T_KO","T-KO",rownames_convT)
+```
+
+```{r}
+rownames(convT@meta.data) <- rownames_convT
+rownames(convT@reductions$umap@cell.embeddings) <- rownames_convT
+rownames(convT@reductions$tsne@cell.embeddings) <- rownames_convT
+rownames(convT@reductions$pca@cell.embeddings) <- rownames_convT
+rownames(convT@reductions$harmony@cell.embeddings) <- rownames_convT
+rownames(convT@assays$RNA@cells@.Data) <- rownames_convT
+names(convT@active.ident) <- rownames_convT
+convT@graphs$RNA_nn@Dimnames[[1]] <- rownames_convT
+convT@graphs$RNA_snn@Dimnames[[1]] <- rownames_convT
+convT@graphs$RNA_nn@Dimnames[[2]] <- rownames_convT
+convT@graphs$RNA_snn@Dimnames[[2]] <- rownames_convT
+```
+
+```{r}
+screp <- combineExpression(combined, 
+                                   convT, 
+                                   cloneCall="gene", 
+                                   proportion = F, 
+                                   cloneTypes=c(Single=1, Small=5, Medium=20, Large=100, Hyperexpanded=500))
+
+```
+
+```{r}
+colnames(screp@meta.data)
+```
+```{r}
+slot(screp, "meta.data")$cloneType <- factor(slot(screp, "meta.data")$cloneType, 
+                levels = c("Hyperexpanded (100 < X <= 500)", 
+                           "Large (20 < X <= 100)", 
+                           "Medium (5 < X <= 20)", 
+                           "Small (1 < X <= 5)", 
+                           "Single (0 < X <= 1)", NA))
+```
+
+```{r}
+DimPlot(screp, group.by = "cloneType")
+```
+
+```{r}
+save(screp,file = "../V2_processing_analysis/R_outs/lymphoid_convT_V2p1_merged_scRep.Robj")
+```
+
+```{r}
+load(file = "../V2_processing_analysis/R_outs/lymphoid_convT_V2p1_merged_scRep.Robj")
+```
+
+
+```{r}
+clonalOverlay(screp, 
+              reduction = "umap", 
+              freq.cutpoint = 1, 
+              bins = 10, 
+              facet = "orig.ident") + 
+              guides(color = "none")
+```
+
+```{r}
+table(screp$celltype)
+```
+
+
+```{r}
+clonalNetwork(screp, 
+              reduction = "umap", 
+              identity = "celltype",
+              filter.clones = NULL,
+              filter.identity =  c("CD8T"),
+              cloneCall = "gene")
+```
+
+
+```{r}
+occupiedscRepertoire(screp, 
+                     x.axis = "orig.ident", 
+                     proportion = TRUE, 
+                     label = FALSE)+ RotatedAxis()
+```
+
+
+```{r}
+g <- alluvialClonotypes(screp, 
+                   cloneCall = "gene", 
+                   y.axes = c("orig.ident", "annotation_prelim", "celltype"), 
+                   color = "annotation_prelim") 
+ggsave(filename = paste0(outdir,"alluvialClonotype_cross_metadata.pdf"),plot = g, units = "cm",width = 40,height = 30)
+```
+
+```{r}
+head(screp@meta.data)
+```
+```{r}
+top_clonotypes <- screp@meta.data %>% group_by(CTgene,Frequency,orig.ident,celltype,annotation_prelim,CTaa,cloneType) %>% summarize(cd3rs_gene = unique(CTgene)) %>% ungroup() %>% group_by(orig.ident) %>% slice_max(order_by = Frequency,n=10) %>% arrange(desc(Frequency)) 
+```
+
+```{r}
+write.table(top_clonotypes,file = paste0(outdir,"top_clones_table_scRep.tsv"),sep = "\t",col.names = T,row.names = F,quote = F)
+```
+
+
+```{r}
+screp <- highlightClonotypes(screp, 
+                    cloneCall= "gene", 
+                    sequence = c("TRAV7-1.TRAJ21.TRAC_TRBV29.NA.TRBJ1-1.TRBC1", "TRAV16N.TRAJ32.TRAC_TRBV10.TRBD2.TRBJ2-3.TRBC2",
+                          "TRAV14D-1.TRAJ39.TRAC_TRBV1.NA.TRBJ1-5.TRBC1","TRAV16N.TRAJ34.TRAC_TRBV13-1.TRBD1.TRBJ1-4.TRBC1","TRAV8N-2.TRAJ50.TRAC_TRBV13-3.NA.TRBJ2-2.TRBC2","TRAV2.TRAJ26.TRAC_TRBV5.NA.TRBJ2-1.TRBC2"))
+screp$highlight <- as.character(screp$highlight)
+Seurat::DimPlot(screp, group.by = "highlight",order = T,alpha = 0.6)+ 
+    scale_color_manual(values = c("TRAV7-1.TRAJ21.TRAC_TRBV29.NA.TRBJ1-1.TRBC1" = "red3","TRAV16N.TRAJ32.TRAC_TRBV10.TRBD2.TRBJ2-3.TRBC2" = "darkblue","TRAV14D-1.TRAJ39.TRAC_TRBV1.NA.TRBJ1-5.TRBC1"="orange","TRAV16N.TRAJ34.TRAC_TRBV13-1.TRBD1.TRBJ1-4.TRBC1" = "purple","TRAV8N-2.TRAJ50.TRAC_TRBV13-3.NA.TRBJ2-2.TRBC2" = "darkolivegreen","TRAV2.TRAJ26.TRAC_TRBV5.NA.TRBJ2-1.TRBC2" = "cyan3"),na.value = "beige")
+g <- Seurat::DimPlot(screp, group.by = "highlight",order = T,alpha = 0.6)+ 
+    scale_color_manual(values = c("TRAV7-1.TRAJ21.TRAC_TRBV29.NA.TRBJ1-1.TRBC1" = "red3","TRAV16N.TRAJ32.TRAC_TRBV10.TRBD2.TRBJ2-3.TRBC2" = "darkblue","TRAV14D-1.TRAJ39.TRAC_TRBV1.NA.TRBJ1-5.TRBC1"="orange","TRAV16N.TRAJ34.TRAC_TRBV13-1.TRBD1.TRBJ1-4.TRBC1" = "purple","TRAV8N-2.TRAJ50.TRAC_TRBV13-3.NA.TRBJ2-2.TRBC2" = "darkolivegreen","TRAV2.TRAJ26.TRAC_TRBV5.NA.TRBJ2-1.TRBC2" = "cyan3"),na.value = "beige")
+ggsave(filename = paste0(outdir,"Popular_clone_by_gene_obverlap.pdf"),plot = g,units = "cm",width = 28,height = 14)
+```
+
+```{r}
+alluvialClonotypes(screp, 
+                   cloneCall = "gene", 
+                   y.axes = c("orig.ident", "annotation_prelim", "celltype"), 
+                   color = "highlight") + 
+    scale_fill_manual(values = c( "TRAV7-1.TRAJ21.TRAC_TRBV29.NA.TRBJ1-1.TRBC1" = "red3","TRAV16N.TRAJ32.TRAC_TRBV10.TRBD2.TRBJ2-3.TRBC2" = "darkblue","TRAV14D-1.TRAJ39.TRAC_TRBV1.NA.TRBJ1-5.TRBC1"="orange","TRAV16N.TRAJ34.TRAC_TRBV13-1.TRBD1.TRBJ1-4.TRBC1" = "purple"),na.value = "beige")
+```
+
+```{r}
+alluvialClonotypes(screp, 
+                   cloneCall = "gene", 
+                   y.axes = c("orig.ident", "annotation_prelim", "celltype"), 
+                   color = "highlight") + 
+    scale_fill_manual(values = c( "CAVMSNYNVLYF_CALGNTEVFF" = "red3","CAMREGYGSSGNKLIF_CASSWDWGGLSAETLYF" = "darkblue","CAASNAGAKLTF_CTCSDRFQAPLF"="orange","CAMREGSYTNKVVF_CASSPGQGYERLFF" = "purple"),na.value = "beige")
+```
+
+```{r}
+circles <- getCirclize(screp, 
+                       group.by = "annotation_prelim")
+
+#Just assigning the normal colors to each cluster
+grid.cols <- hue_pal()(length(unique(screp$annotation_prelim)))
+names(grid.cols) <- unique(screp$annotation_prelim)
+
+#Graphing the chord diagram
+chordDiagram(circles, self.link = 1, grid.col = grid.cols) 
+```
+
+```{r}
+pdf(paste0(outdir,"chordDiagram.pdf"))
+chordDiagram(circles, self.link = 1, grid.col = grid.cols) 
+dev.off()
+```
+
+```{r}
+subset <- subset(screp, celltype == "CD8T")
+
+
+circles <- getCirclize(subset, group.by = "annotation_prelim")
+
+grid.cols <- scales::hue_pal()(length(unique(subset$annotation_prelim)))
+names(grid.cols) <- levels(subset$annotation_prelim)
+
+chordDiagram(circles, 
+             self.link = 1, 
+             grid.col = grid.cols, 
+             directional = 1, 
+             direction.type =  "arrows",
+             link.arr.type = "big.arrow")
+```
+
+```{r}
+sub_combined <- clusterTCR(combined, 
+                           chain = "TRA", 
+                           sequence = "aa", 
+                           threshold = 0.85, 
+                           group.by = NULL)
+```
+
+
+```{r}
+save(sub_combined,file = paste0(outdir,"scRep_TCR_cluster.Robj"))
+```
+
+
+```{r}
+StartracDiversity(screp, 
+                  type = "orig.ident", 
+                  sample = "orig.ident", 
+                  by = "overall")
+```
+### utilizing clustering and annotation information
+
+```{r}
+combined2 <- expression2List(screp, split.by = "annotation_prelim")
+```
+
+```{r}
+clonalDiversity(combined2, cloneCall = "aa")
+```
+
+```{r}
+clonalHomeostasis(combined2, cloneCall = "aa",split.by = "orig.ident") + RotatedAxis() 
+```
+
+```{r}
+clonalProportion(combined2, cloneCall = "aa")+ RotatedAxis()
+```
+
+```{r}
+clonalOverlap(combined2, cloneCall="aa", method="overlap") + RotatedAxis()
+```
+
+
+
+```{r}
+save(screp,file = "../V2_processing_analysis/R_outs/lymphoid_convT_V2p1_merged_scRep.Robj")
+```
+
+
+
+### merge with entire lymphoid
+
+```{r}
+load("../V2_processing_analysis/R_outs/lymphoid_V2p1_merged.Robj")
+```
+
+```{r}
+DimPlot(lymphoid)
+```
+
+```{r}
+rownames_lymphoid <- rownames(lymphoid@meta.data)
+rownames_lymphoid <- gsub("NT_C","NT-C",rownames_lymphoid)
+rownames_lymphoid <- gsub("T_C","T-C",rownames_lymphoid)
+rownames_lymphoid <- gsub("NT_KO","NT-KO",rownames_lymphoid)
+rownames_lymphoid <- gsub("T_KO","T-KO",rownames_lymphoid)
+```
+
+```{r}
+rownames(lymphoid@meta.data) <- rownames_lymphoid
+rownames(lymphoid@reductions$umap@cell.embeddings) <- rownames_lymphoid
+rownames(lymphoid@reductions$tsne@cell.embeddings) <- rownames_lymphoid
+rownames(lymphoid@reductions$pca@cell.embeddings) <- rownames_lymphoid
+rownames(lymphoid@reductions$harmony@cell.embeddings) <- rownames_lymphoid
+rownames(lymphoid@assays$RNA@cells@.Data) <- rownames_lymphoid
+names(lymphoid@active.ident) <- rownames_lymphoid
+lymphoid@graphs$RNA_nn@Dimnames[[1]] <- rownames_lymphoid
+lymphoid@graphs$RNA_snn@Dimnames[[1]] <- rownames_lymphoid
+lymphoid@graphs$RNA_nn@Dimnames[[2]] <- rownames_lymphoid
+lymphoid@graphs$RNA_snn@Dimnames[[2]] <- rownames_lymphoid
+```
+
+
+```{r}
+screp_lymphoid <- combineExpression(combined, 
+                                   lymphoid, 
+                                   cloneCall="gene", 
+                                   proportion = F, 
+                                   cloneTypes=c(Single=1, Small=5, Medium=20, Large=100, Hyperexpanded=500))
+```
+
+```{r}
+slot(screp_lymphoid, "meta.data")$cloneType <- factor(slot(screp_lymphoid, "meta.data")$cloneType, 
+                levels = c("Hyperexpanded (100 < X <= 500)", 
+                           "Large (20 < X <= 100)", 
+                           "Medium (5 < X <= 20)", 
+                           "Small (1 < X <= 5)", 
+                           "Single (0 < X <= 1)", NA))
+```
+
+```{r}
+DimPlot(screp_lymphoid, group.by = "cloneType")
+```
+
+```{r}
+save(screp_lymphoid,file = "../V2_processing_analysis/R_outs/lymphoid_V2p1_merged_scRep.Robj")
+```
+
+## perform merge for CD4 and CD8 subsets
+
+### merge with CD8 subset
+
+```{r}
+load(paste0("../V2_processing_analysis/R_outs/lymphoid_convT_CD8_V2p1.Robj"))
+```
+
+```{r}
+DimPlot(CD8,group.by = "annotation_prelim")
+DimPlot(CD8)
+```
+
+```{r}
+rownames_CD8 <- rownames(CD8@meta.data)
+rownames_CD8 <- gsub("NT_C","NT-C",rownames_CD8)
+rownames_CD8 <- gsub("T_C","T-C",rownames_CD8)
+rownames_CD8 <- gsub("NT_KO","NT-KO",rownames_CD8)
+rownames_CD8 <- gsub("T_KO","T-KO",rownames_CD8)
+```
+
+```{r}
+rownames(CD8@meta.data) <- rownames_CD8
+rownames(CD8@reductions$umap@cell.embeddings) <- rownames_CD8
+rownames(CD8@reductions$tsne@cell.embeddings) <- rownames_CD8
+rownames(CD8@reductions$pca@cell.embeddings) <- rownames_CD8
+rownames(CD8@reductions$harmony@cell.embeddings) <- rownames_CD8
+rownames(CD8@assays$RNA@cells@.Data) <- rownames_CD8
+names(CD8@active.ident) <- rownames_CD8
+CD8@graphs$RNA_nn@Dimnames[[1]] <- rownames_CD8
+CD8@graphs$RNA_snn@Dimnames[[1]] <- rownames_CD8
+CD8@graphs$RNA_nn@Dimnames[[2]] <- rownames_CD8
+CD8@graphs$RNA_snn@Dimnames[[2]] <- rownames_CD8
+```
+
+
+```{r}
+CD8 <- combineExpression(combined, 
+                                   CD8, 
+                                   cloneCall="gene", 
+                                   proportion = F, 
+                                   cloneTypes=c(Single=1, Small=5, Medium=20, Large=100, Hyperexpanded=500))
+```
+
+```{r}
+slot(CD8, "meta.data")$cloneType <- factor(slot(CD8, "meta.data")$cloneType, 
+                levels = c("Hyperexpanded (100 < X <= 500)", 
+                           "Large (20 < X <= 100)", 
+                           "Medium (5 < X <= 20)", 
+                           "Small (1 < X <= 5)", 
+                           "Single (0 < X <= 1)", NA))
+```
+
+```{r}
+DimPlot(CD8, group.by = "cloneType")
+```
+
+```{r}
+CD8 <- JoinLayers(CD8)
+save(CD8,file = paste0("../V2_processing_analysis/R_outs/","lymphoid_conv_CD8_V2p1_merged_scRep.Robj"))
+```
+
+### CD4 subset
+
+
+```{r}
+load(paste0("../V2_processing_analysis/R_outs/lymphoid_convT_CD4_V2p1.Robj"))
+```
+
+```{r}
+DimPlot(CD4)
+```
+
+```{r}
+rownames_CD4 <- rownames(CD4@meta.data)
+rownames_CD4 <- gsub("NT_C","NT-C",rownames_CD4)
+rownames_CD4 <- gsub("T_C","T-C",rownames_CD4)
+rownames_CD4 <- gsub("NT_KO","NT-KO",rownames_CD4)
+rownames_CD4 <- gsub("T_KO","T-KO",rownames_CD4)
+```
+
+```{r}
+rownames(CD4@meta.data) <- rownames_CD4
+rownames(CD4@reductions$umap@cell.embeddings) <- rownames_CD4
+rownames(CD4@reductions$tsne@cell.embeddings) <- rownames_CD4
+rownames(CD4@reductions$pca@cell.embeddings) <- rownames_CD4
+rownames(CD4@reductions$harmony@cell.embeddings) <- rownames_CD4
+rownames(CD4@assays$RNA@cells@.Data) <- rownames_CD4
+names(CD4@active.ident) <- rownames_CD4
+CD4@graphs$RNA_nn@Dimnames[[1]] <- rownames_CD4
+CD4@graphs$RNA_snn@Dimnames[[1]] <- rownames_CD4
+CD4@graphs$RNA_nn@Dimnames[[2]] <- rownames_CD4
+CD4@graphs$RNA_snn@Dimnames[[2]] <- rownames_CD4
+```
+
+
+```{r}
+CD4 <- combineExpression(combined, 
+                                   CD4, 
+                                   cloneCall="gene", 
+                                   proportion = F, 
+                                   cloneTypes=c(Single=1, Small=5, Medium=20, Large=100, Hyperexpanded=500))
+```
+
+```{r}
+slot(CD4, "meta.data")$cloneType <- factor(slot(CD4, "meta.data")$cloneType, 
+                levels = c("Hyperexpanded (100 < X <= 500)", 
+                           "Large (20 < X <= 100)", 
+                           "Medium (5 < X <= 20)", 
+                           "Small (1 < X <= 5)", 
+                           "Single (0 < X <= 1)", NA))
+```
+
+```{r}
+DimPlot(CD4, group.by = "cloneType")
+```
+
+```{r}
+CD4 <- JoinLayers(CD4)
+save(CD4,file = paste0("../V2_processing_analysis/R_outs/","lymphoid_conv_CD4_V2p1_merged_scRep.Robj"))
+```
+
+
+# Part 2: chain-specific analysis
+
+## 2.1 using scRep outs
+
+```{r}
+# extract meta.data and keep only non-NA rows
+meta <- screp@meta.data[!is.na(screp$CTaa),]
+```
+
+```{r}
+cd3r_aa_vec <- unique(meta$CTaa)
+cd3r_gene_vec <- unique(meta$CTgene)
+```
+
+```{r}
+# iterate through cd3 gene or aa
+# for now, use index for iteration
+# for each clone, generate two sets of values: frequency of clone in each sample (4 values)
+# and the log2FC across similar pathology samples. i.e. NT-KO v.s NT-C; T-KO v.s. T-C. 
+# Since we expect KO phenotype to have negative effects on clonal expansion, I may take the -log2FC.
+n_gene <- length(cd3r_gene_vec)
+samples <- unique(unname(meta$orig.ident)) # "NT_C"  "NT_KO" "T_C"   "T_KO"
+clons_convT_summary <- data.frame(matrix(rep(NA,5),byrow = T,nrow = 1)) # This is not the best way to initialize
+# "log2(NT-KO/NT-C)","log2(T-KO/T-C)"
+colnames(clons_convT_summary) <- c("CTgene",samples)
+for (i in 1:n_gene){
+  clone <- cd3r_gene_vec[i]
+  clone_info <- c(clone)
+  # extract frequency of the clone in each sample.
+  for (j in samples){
+    if (sum(meta[meta$orig.ident == j,"CTgene"] == clone)){
+      clone_info <- c(clone_info,sum(meta[(meta$orig.ident == j) & (meta$CTgene == clone),"Frequency"]))
+      # if the gene appear as multiple times, then use sum
+    } else{
+      clone_info <- c(clone_info,0) 
+    }
+  }
+  clons_convT_summary[i,] <- clone_info
+}
+log2NT <- log2((as.numeric(clons_convT_summary[,"NT_KO"])+0.1)/(as.numeric(clons_convT_summary[,"NT_C"])+0.1))
+log2T <- log2((as.numeric(clons_convT_summary[,"T_KO"])+0.1)/(as.numeric(clons_convT_summary[,"T_C"])+0.1))
+clons_convT_summary <- cbind(clons_convT_summary,log2NT,log2T)
+```
+
+
+```{r}
+ggplot(clons_convT_summary,aes(x = -log2T, y = -log2NT))+
+  geom_point()+
+  geom_hline(yintercept  = 0,color = "red2")+
+  geom_vline(xintercept = 0, color = "red2")+
+  geom_text_repel(data = subset(clons_convT_summary,(-log2NT > 1) & (-log2T > 1)),aes(x = -log2T, y = -log2NT,label = CTgene,color = "darkgreen"),hjust= "inward", vjust= "inward",nudge_y = 0.5,nudge_x = 0.5,size = 2,angle = 0,check_overlap = F)
+```
+
+
+
+
+## 2.2 start with conventional CD8 T cells
+
+```{r}
+indir <- "TCR_outs/"
+clons_file <- "clons_convT.txt"
+cells_file <- "clons_by_cell_convT.txt"
+```
+
+```{r}
+clons_convT <- fread(paste(indir, clons_file, sep = "")) 
+cells_convT <- fread(paste(indir, cells_file, sep = "")) 
+```
+
+
+```{r}
+clons_convT <- clons_convT %>% mutate(cdr3s_gene = paste(TRAV,TRBV,sep = "-"))
+```
+
+```{r}
+clons_convT %>% group_by(cdr3s_gene,Sample,frequency) %>% summarise(freq_across_sample = n()) %>% arrange(desc(freq_across_sample))
+
+```
+
+```{r}
+cd3r_aa_vec <- unique(clons_convT$cdr3s_aa)
+cd3r_gene_vec <- unique(clons_convT$cdr3s_gene)
+```
+
+
+```{r}
+# iterate through cd3 gene or aa
+# for now, use index for iteration
+# for each clone, generate two sets of values: frequency of clone in each sample (4 values)
+# and the log2FC across similar pathology samples. i.e. NT-KO v.s NT-C; T-KO v.s. T-C. 
+# Since we expect KO phenotype to have negative effects on clonal expansion, I may take the -log2FC.
+n_gene <- length(cd3r_gene_vec)
+samples <- unique(unname(clons_convT$Sample))
+clons_convT_summary <- data.frame(matrix(rep(NA,5),byrow = T,nrow = 1)) # This is not the best way to initialize
+# "log2(NT-KO/NT-C)","log2(T-KO/T-C)"
+colnames(clons_convT_summary) <- c("cdr3_gene",samples)
+for (i in 1:n_gene){
+  clone <- cd3r_gene_vec[i]
+  clone_info <- c(clone)
+  # extract frequency of the clone in each sample.
+  for (j in samples){
+    if (sum(clons_convT[clons_convT$Sample == j,"cdr3s_gene"] == clone)){
+      clone_info <- c(clone_info,sum(clons_convT[(clons_convT$Sample == j) & (clons_convT$cdr3s_gene == clone),"frequency"]))
+      # if the gene appear as multiple times, then use sum
+    } else{
+      clone_info <- c(clone_info,0) 
+    }
+  }
+  clons_convT_summary[i,] <- clone_info
+}
+log2NT <- log2((as.numeric(clons_convT_summary[,"NT_KO"])+0.1)/(as.numeric(clons_convT_summary[,"NT_C"])+0.1))
+log2T <- log2((as.numeric(clons_convT_summary[,"T_KO"])+0.1)/(as.numeric(clons_convT_summary[,"T_C"])+0.1))
+clons_convT_summary <- cbind(clons_convT_summary,log2NT,log2T)
+```
+
+
+```{r}
+ggplot(clons_convT_summary,aes(x = -log2T, y = -log2NT))+
+  geom_point()+
+  geom_hline(yintercept  = 0,color = "red2")+
+  geom_vline(xintercept = 0, color = "red2")+
+  geom_text_repel(data = subset(clons_convT_summary,((-log2NT > 5) & (-log2T > 5)) | ((-log2NT < -4) & (-log2T < -4)) | ((-log2NT < -4 ) & (-log2T > 5)) | ((-log2NT > 4) & (-log2T < -4))),aes(x = -log2T, y = -log2NT,label = cdr3_gene),hjust= "inward", vjust= "inward",nudge_y = 0.5,nudge_x = 0.5,size = 2,angle = 0,colour = "red3")
+```
+
+```{r}
+write.table(clons_convT_summary,file = paste0(outdir,"log2FC_convT_clons_table.tsv"),sep = "\t",col.names = T,row.names = F,quote = F)
+```
+
+re-try using amino acids
+
+```{r}
+# iterate through cd3 gene or aa
+# for now, use index for iteration
+# for each clone, generate two sets of values: frequency of clone in each sample (4 values)
+# and the log2FC across similar pathology samples. i.e. NT-KO v.s NT-C; T-KO v.s. T-C. 
+# Since we expect KO phenotype to have negative effects on clonal expansion, I may take the -log2FC.
+n_aa <- length(cd3r_aa_vec)
+samples <- unique(unname(clons_convT$Sample))
+clons_convT_summary_aa <- data.frame(matrix(rep(NA,5),byrow = T,nrow = 1)) # This is not the best way to initialize
+# "log2(NT-KO/NT-C)","log2(T-KO/T-C)"
+colnames(clons_convT_summary_aa) <- c("cdr3_aa",samples)
+for (i in 1:n_aa){
+  clone <- cd3r_aa_vec[i]
+  clone_info <- c(clone)
+  # extract frequency of the clone in each sample.
+  for (j in samples){
+    if (sum(clons_convT[clons_convT$Sample == j,cdr3s_aa] == clone)){
+      clone_info <- c(clone_info,sum(clons_convT[(clons_convT$Sample == j) & (cdr3s_aa == clone),frequency]))
+      # if the gene appear as multiple times, then use sum
+    } else{
+      clone_info <- c(clone_info,0) 
+    }
+  }
+  clons_convT_summary_aa[i,] <- clone_info
+}
+log2NT <- log2((as.numeric(clons_convT_summary_aa[,"NT_KO"])+0.1)/(as.numeric(clons_convT_summary_aa[,"NT_C"])+0.1))
+log2T <- log2((as.numeric(clons_convT_summary_aa[,"T_KO"])+0.1)/(as.numeric(clons_convT_summary_aa[,"T_C"])+0.1))
+clons_convT_summary_aa <- cbind(clons_convT_summary_aa,log2NT,log2T)
+```
+
+
+```{r}
+ggplot(clons_convT_summary_aa,aes(x = log2T, y = log2NT))+
+  geom_point()+
+  geom_hline(yintercept  = 1,color = "red2")+
+  geom_vline(xintercept = 1, color = "red2")
+```
+
+

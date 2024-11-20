@@ -1,0 +1,86 @@
+---
+title: "0-4_update_T_cells"
+output: html_document
+date: "2024-09-24"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony) # for integration
+```
+
+```{r}
+RDSdir <- "RDS/"
+outdir <- "R_outs/"
+```
+
+
+```{r}
+load(paste0(RDSdir,"T_cells_V1p3.Robj"))
+```
+
+```{r}
+DimPlot(T_cells,group.by = "RNA_snn_res.1",label = T)
+```
+
+The identity of the cells have alreaday set to RNA_snn_res.1.
+
+```{r}
+FeaturePlot(T_cells,features = "Gata3",label = T)
+FeaturePlot(T_cells,features = "Cd3e",label = T)
+FeaturePlot(T_cells,features = "Klrb1c",label = T)
+```
+
+```{r}
+ILC2 <- subset(T_cells,idents = 11) # version V1p4 such that merging ILC2_V1p4 and T_cells_V1p4 will give you T cells V1p3.
+T_cells <- subset(T_cells, idents = c(0:26)[!(c(0:26) %in% c(11))] ) # The NK-like clusters are still there
+# take every cluster from 0 to 26 except 11.
+
+```
+
+sanity check
+
+```{r}
+DimPlot(ILC2,group.by = "RNA_snn_res.1",label = T)
+DimPlot(T_cells,group.by = "RNA_snn_res.1",label = T)
+```
+```{r eval=FALSE}
+save(ILC2, file = paste0(RDSdir,"ILC2_V1p4.Robj"))
+save(T_cells, file = paste0(RDSdir,"T_cells_V1p4.Robj"))
+```
+
+```{r}
+T_cells <- FindVariableFeatures(object = T_cells, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(T_cells) <-  VariableFeatures(T_cells) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(T_cells))]
+VariableFeaturePlot(T_cells)
+
+T_cells <- ScaleData(object = T_cells, features = VariableFeatures(object = T_cells), vars.to.regress = c("nCount_RNA", "percent.mt"))
+T_cells <- RunPCA(object = T_cells,
+                features =  VariableFeatures(object = T_cells),
+                dims = 1:50)
+gc()
+ElbowPlot(T_cells,ndims = 50)
+```
+
+```{r}
+T_cells <- RunUMAP(T_cells,dims = 1:30,reduction = "harmony") # use harmony embedding for downstream analysis
+T_cells <- RunTSNE(T_cells,dims = 1:30,reduction = "harmony")
+
+T_cells <- FindNeighbors(T_cells, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  T_cells <- FindClusters(object = T_cells, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+T_cells <- JoinLayers(T_cells) # required for seurat V5
+```
+
+```{r}
+DimPlot(T_cells,group.by = "RNA_snn_res.1",label = T)
+```
+
+
+```{r eval=FALSE}
+save(T_cells, file = paste0(RDSdir,"T_cells_V1p4.Robj"))
+```
+

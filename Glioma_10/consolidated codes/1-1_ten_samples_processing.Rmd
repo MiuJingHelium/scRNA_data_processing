@@ -1,0 +1,606 @@
+---
+title: "10 samples"
+output: html_document
+---
+
+```{r message=F}
+library(dplyr)
+library(magrittr)
+library(Seurat)
+library(ggplot2)
+library(ggpubr)
+library(ggsci)
+library(gplots)
+library(Matrix)
+library(qlcMatrix)#devtools::install_github("cysouw/qlcMatrix")
+library(cowplot)
+library(svMisc)
+```
+
+
+```{r}
+library(scater)
+library(pbapply)
+```
+
+code source:https://github.com/nyuhuyang/scRNAseq-GBM/blob/main/R/10_samples/QC.R
+
+
+```{r}
+sessionInfo()
+```
+
+## QC
+
+```{r}
+source("https://raw.githubusercontent.com/nyuhuyang/SeuratExtra/master/R/Seurat4_functions.R")
+path <- paste0("output/","20240112/")
+if(!dir.exists(path)) dir.create(path, recursive = T)
+if(!dir.exists("data")) dir.create("data")
+if(!dir.exists("doc")) dir.create("doc")
+```
+
+```{r}
+#======1.1 Load the data files and Set up Seurat object =========================
+# read sample summary list
+df_samples <- readxl::read_excel("doc/20220614_scRNAseq_info.xlsx")
+df_samples = as.data.frame(df_samples)
+colnames(df_samples) %<>% tolower()
+```
+
+```{r}
+# check missing data
+read.path = "outs/align_outs/"
+current <- list.files(read.path)
+(missing_data <- df_samples$sample.id[!(df_samples$sample.id %in% current)])
+
+#======1.1.2 record data quality before removing low quanlity cells =========================
+## Load the GEX dataset
+message("Loading the datasets")
+Seurat_list <- pblapply(df_samples$sample.id, function(s){
+        tmp <- Read10X(data.dir = paste0(read.path,"/",as.character(s),"/filtered_feature_bc_matrix"))
+        colnames(tmp) %<>% gsub("-[0-9+]","",.)
+        s = df_samples[df_samples$sample.id == s,"sample"]
+        colnames(tmp) = paste0(s,"-", colnames(tmp))
+        CreateSeuratObject(tmp,min.cells = 0,names.delim = "-",min.features = 0)
+})
+```
+
+
+```{r}
+#========1.1.3 g1 QC plots before filteration=================================
+object <- Reduce(function(x, y) merge(x, y, do.normalize = F), Seurat_list)
+#remove(Seurat_list);GC()
+# read and select mitochondial genes
+mito <- "^mt-"
+message("mito.genes:")
+
+(mito.features <- grep(pattern = mito, x = rownames(object), value = TRUE))
+object[["percent.mt"]] <- PercentageFeatureSet(object = object, pattern = mito)
+object$orig.ident %<>% factor(levels = df_samples$`sample`)
+Idents(object) = "orig.ident"
+g1 <- lapply(c("nFeature_RNA", "nCount_RNA", "percent.mt"), function(features){
+        VlnPlot(object = object, features = features, ncol = 1, pt.size = 0.01)+
+                theme(axis.text.x = element_text(size=15,angle = 45,hjust = 1,vjust = 1),
+                      legend.position="none",plot.title = element_text(hjust = 0.5))
+})
+save(g1,file= paste0(path,"g1","_",length(df_samples$sample),"_",gsub("-","",Sys.Date()),".Rda"))
+
+#============1.2 scatter ======================
+object %<>% subset(nFeature_RNA > 300
+                   & nCount_RNA > 500
+                   & percent.mt < 15
+)
+meta_data = object@meta.data
+meta_data$discard = FALSE
+for(i in 1:length(df_samples$sample)){
+        cell = rownames(meta_data)[meta_data$orig.ident %in% df_samples$`sample`[i]]
+        high.mito <- isOutlier(meta_data[cell,"percent.mt"], nmads=3, type="higher")
+        low.lib <- isOutlier(log10(meta_data[cell,"nCount_RNA"]), type="lower", nmad=3)
+        low.genes <- isOutlier(log10(meta_data[cell,"nFeature_RNA"]), type="lower", nmad=3)
+        discard <- high.mito | low.lib | low.genes
+        print(data.frame(HighMito= sum(high.mito),LowLib=sum(low.lib),
+                         LowNgenes=sum(low.genes),Discard=sum(discard)))
+        meta_data[cell,"discard"] = discard
+}
+object@meta.data = meta_data
+table(object$orig.ident, object$discard)
+
+object %<>% subset(subset = discard == FALSE)
+```
+
+```{r}
+# FilterCellsgenerate Vlnplot before and after filteration
+Idents(object) = "orig.ident"
+Idents(object) %<>% factor(levels = df_samples$`sample`)
+
+g2 <- lapply(c("nFeature_RNA", "nCount_RNA", "percent.mt"), function(features){
+        VlnPlot(object = object, features = features, ncol = 1, pt.size = 0.01)+
+                theme(axis.text.x = element_text(size=15,angle = 45,hjust = 1,vjust = 1),
+                      legend.position="none",plot.title = element_text(hjust = 0.5))
+})
+save(g2,file= paste0(path,"g2","_",length(df_samples$sample),"_",gsub("-","",Sys.Date()),".Rda"))
+#load(paste0(save.path,"g2_58_20201009.Rda"))
+
+jpeg(paste0(path,"S1_nGene.jpeg"), units="in", width=10, height=7,res=600)
+print(plot_grid(g1[[1]]+ggtitle("nFeature_RNA before filteration")+
+                        scale_y_log10(limits = c(100,10000))+
+                        theme(plot.title = element_text(hjust = 0.5)),
+                g2[[1]]+ggtitle("nFeature_RNA after filteration")+
+                        scale_y_log10(limits = c(100,10000))+
+                        theme(plot.title = element_text(hjust = 0.5))))
+dev.off()
+jpeg(paste0(path,"S1_nUMI.jpeg"), units="in", width=10, height=7,res=600)
+print(plot_grid(g1[[2]]+ggtitle("nCount_RNA before filteration")+
+                        scale_y_log10(limits = c(500,100000))+
+                        theme(plot.title = element_text(hjust = 0.5)),
+                g2[[2]]+ggtitle("nCount_RNA after filteration")+
+                        scale_y_log10(limits = c(500,100000))+
+                        theme(plot.title = element_text(hjust = 0.5))))
+dev.off()
+jpeg(paste0(path,"S1_mito.jpeg"), units="in", width=10, height=7,res=600)
+print(plot_grid(g1[[3]]+ggtitle("mito % before filteration")+
+                        ylim(c(0,50))+
+                        theme(plot.title = element_text(hjust = 0.5)),
+                g2[[3]]+ggtitle("mito % after filteration")+
+                        ylim(c(0,50))+
+                        theme(plot.title = element_text(hjust = 0.5))))
+dev.off()
+
+format(object.size(object),unit = "GB")
+
+```
+
+```{r eval=F}
+saveRDS(object, file = "data/GBM_10_20220707.rds")
+```
+
+## Processing
+
+reference code:https://github.com/nyuhuyang/scRNAseq-GBM/blob/main/R/10_samples/Seurat_setup.R
+
+```{r eval=F}
+#======1.1 Setup the Seurat objects =========================
+# read sample summary list
+# read sample summary list
+df_samples <- readxl::read_excel("doc/20220614_scRNAseq_info.xlsx")
+df_samples = as.data.frame(df_samples)
+colnames(df_samples) %<>% tolower()
+
+#======1.2 load  Seurat =========================
+object = readRDS(file = "data/GBM_10_20220707.rds")
+```
+
+
+```{r}
+table(df_samples$sample %in% object$orig.ident)
+meta.data = object@meta.data
+for(i in 1:length(df_samples$sample)){
+    cells <- meta.data$orig.ident %in% df_samples$sample[i]
+    print(df_samples$sample[i])
+    print(table(cells))
+    meta.data[cells,"sample.id"] = df_samples$sample.id[i]
+    meta.data[cells,"progress"] = df_samples$progress[i]
+    #meta.data[cells,"sort"] = df_samples$sort[i]
+    }
+meta.data$orig.ident %<>% factor(levels = df_samples$sample)
+table(rownames(object@meta.data) == rownames(meta.data))
+table(colnames(object) == rownames(meta.data))
+object@meta.data = meta.data
+Idents(object) = "orig.ident"
+```
+
+```{r}
+#======1.6 Performing SCTransform and integration =========================
+set.seed(100)
+object_list <- SplitObject(object, split.by = "orig.ident")
+remove(object);GC()
+
+object_list %<>% lapply(function(x) {
+    x <- NormalizeData(x)
+    x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+
+features <- SelectIntegrationFeatures(object.list = object_list)
+
+options(future.globals.maxSize= object.size(object_list)*1.5)
+object_list %<>% pblapply(FUN = function(x) {
+    x <- ScaleData(x, features = features, verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE)
+})
+anchors <- FindIntegrationAnchors(object.list = object_list,anchor.features = features)
+
+#remove(object_list)
+GC()
+# this command creates an 'integrated' data assay
+object <- IntegrateData(anchorset = anchors)
+remove(anchors);GC()
+format(object.size(object),unit = "GB")
+
+```
+```{r eval=F}
+saveRDS(object, file = "data/GBM_10_20220707.rds")
+```
+
+
+```{r}
+DefaultAssay(object) <- "integrated"
+
+# Run the standard cca workflow for umap & tsne visualization
+object %<>% ScaleData(verbose = FALSE)
+object %<>% RunPCA(npcs = 100, verbose = FALSE)
+jpeg(paste0(path,"ElbowPlot.jpeg"), units="in", width=10, height=7,res=600)
+print(ElbowPlot(object,ndims = 100))
+dev.off()
+npcs =100
+object %<>% JackStraw(num.replicate = 100,dims = npcs)
+object %<>% ScoreJackStraw(dims = 1:npcs)
+
+a = 0:9*10+1
+for(i in 1:length(a)){
+    b = a[i]+9
+    jpeg(paste0(path,"JackStrawPlot_",a[i],"_",b,".jpeg"), units="in", width=10, height=7,res=600)
+    print(JackStrawPlot(object, dims = a[i]:b))
+    dev.off()
+    Progress(i,length(a))
+}
+npcs = 95
+
+object %<>% RunUMAP(reduction = "pca", dims = 1:npcs)
+system.time(object %<>% RunTSNE(reduction = "pca", dims = 1:npcs))
+
+object[["cca.umap"]] <- CreateDimReducObject(embeddings = object@reductions[["umap"]]@cell.embeddings,
+                                             key = "ccaUMAP_", assay = DefaultAssay(object))
+object[["cca.tsne"]] <- CreateDimReducObject(embeddings = object@reductions[["tsne"]]@cell.embeddings,
+                                             key = "ccatSNE_", assay = DefaultAssay(object))
+
+```
+
+```{r eval=F}
+saveRDS(object, file = "data/GBM_10_20220707.rds")
+```
+
+```{r}
+object <- readRDS(file = "data/GBM_10_20220707.rds")
+```
+
+
+```{r}
+#======1.7 UMAP from raw pca =========================
+format(object.size(object),unit = "GB")
+DefaultAssay(object) = "RNA"
+#object[["SCT]] is too large, around 80 GB
+object[['SCT']] = NULL
+object %<>% SCTransform(method = "glmGamPoi", vars.to.regress = "percent.mt", verbose = TRUE)
+```
+
+```{r}
+#error with find variable features
+# SCTransform provides var enes by default;
+
+VariableFeatures(object) <- object@assays$SCT@var.features[1:2000] #keep top 2000 var features;
+
+object %<>% ScaleData(verbose = FALSE)
+object %<>% RunPCA(verbose = T,npcs = 100)
+
+jpeg(paste0(path,"S1_ElbowPlot_SCT.jpeg"), units="in", width=10, height=7,res=600)
+ElbowPlot(object, ndims = 100)
+dev.off()
+```
+
+```{r eval=F}
+saveRDS(object, file = "data/GBM_10_20220707.rds")
+```
+
+```{r}
+#======1.8 UMAP from harmony =========================
+DefaultAssay(object) = "SCT"
+
+npcs = 95
+jpeg(paste0(path,"S1_RunHarmony.jpeg"), units="in", width=10, height=7,res=600)
+object %<>% RunHarmony(group.by = "orig.ident", dims.use = 1:npcs,
+                                     theta = 2, plot_convergence = TRUE,
+                                     nclust = 50, max.iter = 100, ncores=32)
+dev.off()
+
+object %<>% RunUMAP(reduction = "harmony", dims = 1:npcs)
+system.time(object %<>% RunTSNE(reduction = "harmony", dims = 1:npcs))
+
+object[["harmony.umap"]] <- CreateDimReducObject(embeddings = object@reductions[["umap"]]@cell.embeddings,
+                                                 key = "harmonyUMAP_", assay = DefaultAssay(object))
+object[["harmony.tsne"]] <- CreateDimReducObject(embeddings = object@reductions[["tsne"]]@cell.embeddings,
+                                                 key = "harmonytSNE_", assay = DefaultAssay(object))
+
+object %<>% RunUMAP(reduction = "pca", dims = 1:npcs)
+system.time(object %<>% RunTSNE(reduction = "pca", dims = 1:npcs))
+object %<>% FindNeighbors(reduction = "umap",dims = 1:2)
+object %<>% FindClusters(resolution = 0.8)
+resolutions = seq(0.1,1.5, by = 0.1)
+for(i in 1:length(resolutions)){
+    object %<>% FindClusters(resolution = resolutions[i],reduction = "umap", algorithm = 1)
+    Progress(i,length(resolutions))
+}
+object <- JoinLayers(object)
+```
+
+```{r eval=F}
+saveRDS(object, file = "data/GBM_10_20220707.rds")
+```
+
+```{r}
+#=======1.9 save SCT only =======================================
+format(object.size(object),unit = "GB")
+
+format(object.size(object@assays$RNA),unit = "GB")
+format(object.size(object@assays$integrated),unit = "GB")
+object[['RNA']] <- NULL
+object[['integrated']] <- NULL
+object[["SCT"]]@scale.data = matrix(0,0,0)
+format(object.size(object),unit = "GB")
+```
+
+```{r eval=F}
+saveRDS(object, file = "data/GBM_SCT_10_20220707.rds")
+```
+
+### Process using logNormalization(lab default pipeline)
+
+```{r}
+whole = readRDS(file = "data/GBM_10_20220707.rds")
+```
+
+```{r}
+whole@assays
+```
+
+```{r}
+DefaultAssay(whole) <- "RNA"
+whole[["SCT"]] <- NULL
+whole[["integrated"]] <- NULL
+```
+
+```{r}
+table(whole$orig.ident)
+```
+
+```{r}
+whole@reductions
+```
+
+
+```{r}
+DimPlot(whole,reduction = "harmony.umap",group.by = "SCT_snn_res.0.1" )
+DimPlot(whole,reduction = "harmony.umap",group.by = "orig.ident", shuffle = T)
+DimPlot(whole,reduction = "harmony.umap",group.by = "progress", shuffle = T)
+```
+
+```{r}
+ggplot(whole@meta.data)+
+  geom_histogram(aes(x=percent.mt,y = after_stat(width*density*100)),bins = 100)+
+  facet_wrap(vars(orig.ident),ncol=1)+
+  geom_vline(xintercept = 5,col="red") +
+  ylab("proportion")+
+  xlab("percentage of mitochondrial RNA")
+```
+
+```{r}
+ggplot(whole@meta.data, aes(x = log10(nFeature_RNA))) +
+  geom_histogram(bins = 100, aes(y = after_stat(width*density*100))) +
+  theme_classic() +
+  facet_wrap(~orig.ident, ncol = 1) +
+  geom_vline(xintercept = 2.5,col="red") + 
+  geom_vline(xintercept = 4,col="red") + 
+  ggtitle("nGene") +
+  ylab("")
+```
+
+```{r}
+ggplot(whole@meta.data, aes(x = log10(nCount_RNA))) +
+  geom_histogram(bins = 100, aes(y = after_stat(width*density*100))) +
+  theme_classic() +
+  facet_wrap(~orig.ident, ncol = 1) +
+  geom_vline(xintercept = 2.5,col="red") + 
+  geom_vline(xintercept = 4.5,col="red") + 
+  ggtitle("nCount") +
+  ylab("")
+```
+
+```{r}
+ggplot(whole@meta.data, aes(x = log10(nCount_ADT))) +
+  geom_histogram(bins = 100, aes(y = after_stat(width*density*100))) +
+  theme_classic() +
+  facet_wrap(~orig.ident, ncol = 1) +
+  geom_vline(xintercept = 2,col="red") + 
+  geom_vline(xintercept = 4.5,col="red") + 
+  ggtitle("nCount") +
+  ylab("")
+```
+
+```{r}
+whole <- JoinLayers(whole)
+```
+
+
+```{r}
+FeaturePlot(whole, features = "H3f3b",reduction = "harmony.umap")
+FeaturePlot(whole, features = "Cd3e",reduction = "harmony.umap")
+FeaturePlot(whole, features = "Cd19",reduction = "harmony.umap")
+FeaturePlot(whole, features = "Adgre1",reduction = "harmony.umap")
+FeaturePlot(whole, features = "Stmn1",reduction = "harmony.umap")
+FeaturePlot(whole, features = "Gpr34",reduction = "harmony.umap")
+```
+```{r}
+FeaturePlot(whole, features = "Myct1",reduction = "harmony.umap")
+FeaturePlot(whole, features = "Pecam1",reduction = "harmony.umap")
+FeaturePlot(whole, features = "P2ry12",reduction = "harmony.umap")
+```
+
+```{r}
+
+p <- DotPlot(whole,group.by = "SCT_snn_res.0.1", features =  c("Gpr34","P2ry12","Ccl3","Ccl4","Dab2","Mrc1","Gpnmb","Axl","Ifitm2","Ifitm3","Ly6c1","Cd3e","Cd4","Tnfrsf4","Cd8a","Ncr1","Cd79a","Camp","Alas2","Gp1bb"))+RotatedAxis()
+ggsave(filename = "./output/DotPlot_non-glioma_markers.pdf",plot = p, units = "cm",height = 30,width = 40)
+```
+
+
+```{r}
+library(gridExtra)
+```
+
+```{r eval=F}
+markers <- c("Gpr34","P2ry12","Ccl3","Ccl4","Dab2","Mrc1","Gpnmb","Axl","Ifitm2","Ifitm3","Ly6c1","Cd3e","Cd4","Tnfrsf4","Cd8a","Ncr1","Cd79a","Camp","Alas2","Gp1bb")
+p <- lapply(markers,function(x){
+    FeaturePlot(whole, reduction = "harmony.umap",features = x,raster = T)
+})
+ggsave(filename = "./output/FeaturePlot_non-glioma_markers.pdf",plot = grid.arrange(grobs = p, ncol = 2), units = "cm",height = 120,width = 40)
+```
+
+```{r}
+p <- DotPlot(whole,group.by = "SCT_snn_res.0.1", features =  c("Sox11","Igfbpl1","Stmn1","Map1b","Nfib","Olig1","Ccnd1","Tpm1","Xist","Tmem176a","Cav2","Aldoc","Plpp3","Gja1","Ttr","Chchd10","Enpp2","Tppp3","Tmem212","Ccdc153"))+RotatedAxis()
+ggsave(filename = "./output/DotPlot_glioma_markers.pdf",plot = p, units = "cm",height = 30,width = 40)
+```
+
+```{r}
+markers <- c("Sox11","Igfbpl1","Stmn1","Map1b","Nfib","Olig1","Ccnd1","Tpm1","Xist","Tmem176a","Cav2","Aldoc","Plpp3","Gja1","Ttr","Chchd10","Enpp2","Tppp3","Tmem212","Ccdc153")
+p <- lapply(markers,function(x){
+    FeaturePlot(whole, reduction = "harmony.umap",features = x,raster = T)
+})
+ggsave(filename = "./output/FeaturePlot_glioma_markers.pdf",plot = grid.arrange(grobs = p, ncol = 2), units = "cm",height = 120,width = 40)
+```
+
+
+```{r}
+save(whole,file = "data/GBM_RNA_10.Robj")
+```
+
+Assume whole is QC finished. 
+
+```{r}
+load("data/GBM_RNA_10.Robj")
+```
+
+```{r}
+whole@reductions
+```
+
+```{r}
+DimPlot(whole, reduction = "harmony.umap",group.by = "orig.ident",shuffle = T)
+DimPlot(whole, reduction = "umap",group.by = "orig.ident",shuffle = T)
+DimPlot(whole, reduction = "harmony.umap",group.by = "SCT_snn_res.0.1")
+```
+
+```{r}
+FeaturePlot(whole, features = "Myct1")
+```
+
+### create RNA layers and umbeddings
+
+
+```{r}
+whole <- NormalizeData(object = whole, normalization.method = "LogNormalize", scale.factor = 10000)
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+#whole@assays$RNA@var.features <-  whole@assays$RNA@var.features[!grepl("^TRA|^TRB|^IGH|^IGK|MAMU-A", whole@assays$RNA@var.features)]
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+```
+
+```{r}
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:100)
+gc()
+save(whole,file = "data/GBM_RNA_10.Robj")
+```
+
+```{r}
+VariableFeaturePlot(whole)
+ElbowPlot(whole,ndims = 50)
+```
+
+```{r}
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+whole <- RunUMAP(whole,dims = 1:50)
+whole <- RunTSNE(whole,dims = 1:50)
+
+whole <- FindNeighbors(whole, reduction = "umap",dims = 1:2)
+for(res in seq(0.1, 1.5, 0.1))  {   
+  whole <- FindClusters(object = whole, reduction = "umap",dims = 1:2,resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+
+```
+
+```{r}
+whole <- JoinLayers(whole)
+```
+
+```{r}
+DimPlot(whole, reduction = "umap",group.by = "orig.ident")
+DimPlot(whole, reduction = "umap",group.by = "RNA_snn_res.0.1")
+```
+```{r}
+whole$nCount_SCT <- NULL
+whole$nFeature_SCT <- NULL
+
+```
+
+
+```{r}
+whole$nCount_RNA_log10 <- log10(whole$nCount_RNA)
+whole$nFeature_RNA_log10 <- log10(whole$nFeature_RNA)
+```
+
+```{r}
+whole@reductions
+```
+
+```{r}
+save(whole,file = "data/GBM_RNA_10.Robj")
+```
+
+```{r}
+Idents(whole) <- whole$RNA_snn_res.0.1
+#FeaturePlot(whole,reduction = "umap",features = "Mertk",label = T,cells = colnames(whole)[(whole$RNA_snn_res.0.6==0) | (whole$RNA_snn_res.0.6==1) | (whole$RNA_snn_res.0.6== 2) | (whole$RNA_snn_res.0.6==3) | (whole$RNA_snn_res.0.6==4) | (whole$RNA_snn_res.0.6==6)] )+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Cd19",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Cd3e",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Ncr1",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Xcl1",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Flt3",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Gpr34",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Ccl2",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Ccr2",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Col5a2",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Myct1",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Pecam1",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Egfr",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+```
+
+```{r}
+FeaturePlot(whole,reduction = "umap",features = "Cd79a",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Ptprc",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Ly6c1",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+```
+```{r}
+FeaturePlot(whole,reduction = "umap",features = "Cd4",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Tnfrsf4",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Cd8a",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Alas2",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Axl",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Camp",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+```
+```{r}
+FeaturePlot(whole,reduction = "umap",features = "Mrc1",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Dab2",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Gpnmb",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Ifitm3",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+```
+```{r}
+FeaturePlot(whole,reduction = "umap",features = "Nos2",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Tox",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Tigit",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole,reduction = "umap",features = "Pdcd1",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+```
+```{r}
+FeaturePlot(whole,reduction = "umap",features = "Olig2",label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+```
+
+
+

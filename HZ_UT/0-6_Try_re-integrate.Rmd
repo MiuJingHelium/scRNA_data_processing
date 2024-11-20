@@ -1,0 +1,128 @@
+---
+title: "0-6_Try_re-integrate"
+output: html_document
+date: "2024-11-11"
+---
+
+```{r}
+# define packages
+library(Seurat)
+library(tidyverse)
+library(harmony)
+library(MAST)
+
+library(miQC)
+library(SeuratWrappers) # for miQC
+library(scuttle)
+
+```
+
+
+
+```{r}
+library(RColorBrewer)
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+```
+
+```{r}
+indir <- "RDS/"
+RDSdir <- "RDS/"
+```
+
+```{r}
+load(paste0(RDSdir,"whole_V1p4.Robj"))
+```
+
+```{r}
+table(whole$orig.ident)
+```
+
+divide into samples and merge back
+
+```{r}
+WT_O <- subset(whole,subset = orig.ident == "WT_Oil")
+WT_T <- subset(whole,subset = orig.ident == "WT_TAM")
+
+PS19_O <- subset(whole,subset = orig.ident == "PS19_Oil")
+PS19_T <- subset(whole,subset = orig.ident == "PS19_TAM")
+```
+
+```{r}
+whole <- merge(x = WT_O, y = c(WT_T,PS19_O,PS19_T))
+```
+
+
+```{r}
+whole <- NormalizeData(object = whole, normalization.method = "LogNormalize", scale.factor = 10000)
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+#VariableFeatures(whole) <-  VariableFeatures(whole) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(whole))]
+#VariableFeaturePlot(whole)
+
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+```
+
+```{r}
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20) # use harmony to correct for batch effect
+whole <- RunUMAP(whole,dims = 1:40,reduction = "harmony") # use harmony embedding for downstream analysis
+whole <- RunTSNE(whole,dims = 1:40,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:40,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+whole <- JoinLayers(whole) # required for seurat V5
+```
+```{r}
+colnames(whole@meta.data)
+```
+
+
+```{r}
+DimPlot(whole, group.by = "condition")
+```
+
+Try SCT...?
+
+```{r}
+VlnPlot(whole, features = "log10_nFeature_RNA",group.by = "orig.ident")
+VlnPlot(whole, features = "log10_nCount_RNA",group.by = "orig.ident")
+```
+```{r}
+whole <- SCTransform(whole, vars.to.regress = "nCount_RNA", verbose = FALSE)
+```
+
+```{r}
+whole <- RunPCA(whole, verbose = FALSE)
+whole <- RunUMAP(whole, dims = 1:15, verbose = FALSE)
+
+whole <- FindNeighbors(whole, dims = 1:15, verbose = FALSE)
+whole <- FindClusters(whole, verbose = FALSE)
+DimPlot(whole, label = TRUE)
+```
+```{r}
+DimPlot(whole, group.by = "orig.ident",reduction = "tsne")
+```
+
+
+```{r}
+load(paste0(RDSdir,"whole_V1p4.Robj"))
+```
+
+```{r}
+DimPlot(whole, group.by = "orig.ident",reduction = "tsne")
+```
+

@@ -1,0 +1,56 @@
+---
+title: "Pub7_auxillary_plots"
+output: html_document
+date: "2024-09-30"
+---
+```{r}
+library(Seurat)
+library(tidyverse)
+library(scater)
+library(data.table)
+library(RColorBrewer)
+library(gridExtra)
+library(ggrepel)
+library(kableExtra)
+library(scRepertoire)
+library(ggraph)
+library(circlize)
+library(scales)
+```
+
+# cell count Gini Index
+
+```{r}
+library(DescTools)
+```
+
+```{r}
+cell_count <- read.delim("cells_per_40000um2.txt",sep = "\t",header = T)
+
+cell_count  <- cell_count %>% reshape2::melt(value.name = "counts",variable.name = "condition")
+cell_count <- cell_count[complete.cases(cell_count),]
+```
+
+
+```{r}
+Gini_df <- cell_count %>% group_by(condition) %>% mutate(Gini_index = Gini(counts)) %>% group_by(condition,Gini_index) %>% summarise()
+```
+
+```{r}
+table(Gini_df$condition)
+```
+
+```{r}
+write.table(Gini_df,file = paste0("cells_per_40000um2_Gini_index.tsv"),sep = "\t",col.names = T,row.names = F)
+```
+
+
+```{r}
+g <- ggplot(Gini_df) +
+  geom_bar(aes(x = condition, y = Gini_index, fill = condition),stat = "identity",position = "dodge")+
+  scale_fill_manual("Condition",values = c("TFE4_WT" = "blue", "TFE4_KO" = "red"))+theme_classic()
+  
+g
+ggsave(filename = paste0("plots/cell_count_Gini_index.pdf"),width = 10,height = 6)
+
+```

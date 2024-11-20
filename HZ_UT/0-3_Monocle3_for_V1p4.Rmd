@@ -1,0 +1,172 @@
+---
+title: "0-3_Monocle3_for_V1p4"
+output: html_document
+date: "2024-10-15"
+---
+
+```{r}
+# define packages
+library(Seurat)
+library(tidyverse)
+library(harmony)
+
+library(miQC)
+library(SeuratWrappers) # for miQC
+library(scuttle)
+```
+
+```{r}
+library(RColorBrewer)
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+```
+
+```{r}
+indir <- "RDS/"
+RDSdir <- "RDS/"
+outdir_prop <- "proportion_plots/"
+if (!dir.exists(outdir_prop)) dir.create(outdir_prop)
+
+outdir_traj <- "Monocle3/"
+if (!dir.exists(outdir_traj)) dir.create(outdir_traj)
+```
+
+```{r}
+load(paste0(indir,"whole_V1p4.Robj"))
+```
+
+
+```{r}
+library(monocle3)
+library(SeuratWrappers)
+cds <- as.cell_data_set(whole)
+cds <- cluster_cells(cds, resolution=1e-2)
+# cds@clusters@listData[["UMAP"]][["clusters"]] <-whole@meta.data[[sprintf("seurat_clusters")]]
+```
+
+```{r}
+cds <- learn_graph(cds, use_partition = T, verbose = FALSE)
+
+
+```
+```{r}
+plot_cells(cds,
+           color_cells_by = "cluster",
+           label_groups_by_cluster=T,
+           label_leaves=F,
+           label_branch_points=T)
+```
+
+
+```{r}
+plot_cells(cds, color_cells_by = "cluster", show_trajectory_graph = FALSE)
+```
+
+
+```{r}
+cds <- order_cells(cds, root_cells = colnames(cds[,clusters(cds) == 14]))
+plot_cells(cds,
+           color_cells_by = "pseudotime",
+           group_cells_by = "cluster",
+           label_cell_groups = T,
+           label_groups_by_cluster=T,
+           label_leaves=F,
+           label_branch_points=T,
+           label_roots = F,
+           cell_size = 1,
+           trajectory_graph_color = "red3")+scale_color_gradientn(colors = c("darkblue","yellow"))+theme_light()
+```
+
+```{r}
+g <- plot_cells(cds,
+           color_cells_by = "pseudotime",
+           group_cells_by = "cluster",
+           label_cell_groups = T,
+           label_groups_by_cluster=T,
+           label_leaves=F,
+           label_branch_points=T,
+           label_roots = F,
+           cell_size = 1,
+           trajectory_graph_color = "red3")+scale_color_gradientn(colors = c("darkblue","yellow"))+theme_light()
+ggsave(paste0(outdir_traj,"Monocle3_plot_whole_V1p4.pdf"), plot = g, width = 10, height = 8)
+```
+
+
+```{r}
+whole <- AddMetaData(whole,metadata = cds@principal_graph_aux@listData$UMAP$pseudotime,col.name = "monocle3_trajectory")
+```
+
+
+
+
+```{r}
+FeaturePlot(whole,reduction = "umap",features = "monocle3_trajectory")+scale_color_viridis_c()
+```
+
+```{r}
+save(whole, file = paste0(RDSdir,"whole_V1p4.Robj"))
+```
+
+
+```{r}
+save(cds, file = paste0(outdir_traj,"whole_V1p4_monocle3.Rdata"))
+```
+
+
+```{r}
+prop_table <- whole@meta.data %>% group_by(orig.ident,RNA_snn_res.0.7,treatment) %>% summarise(cluster_size = n()) %>% ungroup() %>% group_by(orig.ident) %>% mutate(proportion = cluster_size/sum(cluster_size))
+```
+
+
+```{r}
+traj_table <- whole@meta.data %>% group_by(RNA_snn_res.0.7,treatment) %>% summarise(average_pseudotime = mean(monocle3_trajectory)) %>% ungroup() 
+```
+
+```{r}
+ggplot(traj_table)+
+  geom_bar(aes(x = reorder(RNA_snn_res.0.7,average_pseudotime), y = average_pseudotime, fill = treatment),stat = "identity", position = "dodge")+
+  scale_fill_manual(values = c("Oil" = "lightblue", "TAM" = "orange"))+
+  theme_classic()+
+  ylab("average psuedotime of cells from the same cluster and treatment")+
+  xlab("cluster number")
+
+```
+
+
+```{r}
+p1 <- ggplot(prop_table)+
+  geom_bar(aes(x = orig.ident, y = proportion, fill = RNA_snn_res.0.7),stat = "identity", position = "dodge")+
+  facet_wrap(~RNA_snn_res.0.7, scales = "free")+
+  scale_fill_manual(values = pal)+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 90))
+p2 <- DimPlot(whole, group.by = "RNA_snn_res.0.7",label = T,pt.size = 1,label.box = T) +scale_color_manual(values = pal[c(1:8,10:12,14)])+scale_fill_manual(values = pal[c(1:8,10:12,14)])
+p3 <- ggplot(traj_table)+
+  geom_bar(aes(x = reorder(RNA_snn_res.0.7,average_pseudotime), y = average_pseudotime, fill = treatment),stat = "identity", position = "dodge")+
+  scale_fill_manual(values = c("Oil" = "lightblue", "TAM" = "orange"))+
+  theme_classic()+
+  ylab("average psuedotime of cells from the same cluster and treatment")+
+  xlab("cluster number")
+p4 <- plot_cells(cds,
+           color_cells_by = "pseudotime",
+           group_cells_by = "cluster",
+           label_cell_groups = T,
+           label_groups_by_cluster=T,
+           label_leaves=F,
+           label_branch_points=T,
+           label_roots = F,
+           cell_size = 1,
+           trajectory_graph_color = "red3")+scale_color_gradientn(colors = c("darkblue","yellow"))+theme_light()
+g <- gridExtra::grid.arrange(grobs = list(p1,p2,p3,p4),ncol = 2)
+ggsave(plot = g, filename = paste0(outdir_prop,"whole_V1p4_res07_proportion_plot_and_traj.pdf"),width = 20, height = 12)
+```
+
+
+

@@ -1,0 +1,1308 @@
+---
+title: "0_prelimininary_processing"
+output: html_document
+date: "2024-08-06"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony)
+library(DoubletFinder)
+library(miQC)
+library(SoupX)
+library(data.table)
+library(SeuratWrappers) #For miQC
+```
+
+T cell object generated was very preliminary and not the prerequisite object for the final T cell object.
+
+
+
+
+# Single sample processing and merging without DoubletFinder
+
+## Create Objects for each sample
+
+```{r}
+indir = "./alin_outs/" #Can be made into a command-line input
+outdir = "./R_outs/"
+
+```
+
+```{r create object}
+sample = "SR003099_NT-C"
+NT_C <- CreateSeuratObject(Seurat::Read10X(paste(indir,"/", sample, "/outs/per_sample_outs/count/sample_filtered_feature_bc_matrix", sep = "")))
+sample = "SR003099_NT-KO"
+NT_KO <- CreateSeuratObject(Seurat::Read10X(paste(indir,"/", sample, "/outs/per_sample_outs/count/sample_filtered_feature_bc_matrix", sep = "")))
+sample = "SR003099_T-C"
+T_C <- CreateSeuratObject(Seurat::Read10X(paste(indir,"/", sample, "/outs/per_sample_outs/count/sample_filtered_feature_bc_matrix", sep = "")))
+sample = "SR003099_T-KO"
+T_KO <- CreateSeuratObject(Seurat::Read10X(paste(indir,"/", sample, "/outs/per_sample_outs/count/sample_filtered_feature_bc_matrix", sep = "")))
+```
+
+check initial cell number
+
+```{r}
+paste0("number of cells from NT-C is :", ncol(NT_C[["RNA"]]$counts))
+paste0("number of genes from NT-C is :", nrow(NT_C[["RNA"]]$counts))
+paste0("number of cells from NT-KO is :", ncol(NT_KO[["RNA"]]$counts))
+paste0("number of genes from NT-KO is :", nrow(NT_KO[["RNA"]]$counts))
+paste0("number of cells from T-C is :", ncol(T_C[["RNA"]]$counts))
+paste0("number of genes from T-C is :", nrow(T_C[["RNA"]]$counts))
+paste0("number of cells from T-KO is :", ncol(T_KO[["RNA"]]$counts))
+paste0("number of genes from T-KO is :", nrow(T_KO[["RNA"]]$counts))
+```
+
+## Add additional metrics and perform FeatureScatter
+
+```{r}
+NT_C[["percent.mt"]] = PercentageFeatureSet(object = NT_C, pattern = "^MT-|^mt-")
+NT_C$nFeature_RNA_log10 <- log10(NT_C$nFeature_RNA)
+NT_C$nCount_RNA_log10 <- log10(NT_C$nCount_RNA)
+
+NT_KO[["percent.mt"]] = PercentageFeatureSet(object = NT_KO, pattern = "^MT-|^mt-")
+NT_KO$nFeature_RNA_log10 <- log10(NT_KO$nFeature_RNA)
+NT_KO$nCount_RNA_log10 <- log10(NT_KO$nCount_RNA)
+
+T_C[["percent.mt"]] = PercentageFeatureSet(object = T_C, pattern = "^MT-|^mt-")
+T_C$nFeature_RNA_log10 <- log10(T_C$nFeature_RNA)
+T_C$nCount_RNA_log10 <- log10(T_C$nCount_RNA)
+
+T_KO[["percent.mt"]] = PercentageFeatureSet(object = T_KO, pattern = "^MT-|^mt-")
+T_KO$nFeature_RNA_log10 <- log10(T_KO$nFeature_RNA)
+T_KO$nCount_RNA_log10 <- log10(T_KO$nCount_RNA)
+```
+
+
+```{r}
+FeatureScatter(NT_C, feature1 = "nFeature_RNA_log10", feature2 = "percent.mt")+
+  ggtitle("NT-C")
+FeatureScatter(NT_C, feature1 = "nFeature_RNA", feature2 = "percent.mt")+
+  ggtitle("NT-C")
+FeatureScatter(NT_KO, feature1 = "nFeature_RNA_log10", feature2 = "percent.mt")+
+  ggtitle("NT-KO")
+FeatureScatter(NT_KO, feature1 = "nFeature_RNA", feature2 = "percent.mt")+
+  ggtitle("NT-KO")
+FeatureScatter(T_C, feature1 = "nFeature_RNA_log10", feature2 = "percent.mt")+
+  ggtitle("T-C")
+FeatureScatter(T_C, feature1 = "nFeature_RNA", feature2 = "percent.mt")+
+  ggtitle("T-C")
+FeatureScatter(T_KO, feature1 = "nFeature_RNA_log10", feature2 = "percent.mt")+
+  ggtitle("T-KO")
+FeatureScatter(T_KO, feature1 = "nFeature_RNA", feature2 = "percent.mt")+
+  ggtitle("T-KO")
+```
+
+## Run miQC for record keeping and checking threshold
+Actual cutoff will be more conservative than miQC
+
+### NT_C
+
+```{r}
+NT_C <- RunMiQC(NT_C, percent.mt = "percent.mt", nFeature_RNA = "nFeature_RNA", posterior.cutoff = 0.8,
+               model.slot = "flexmix_model")
+PlotMiQC(NT_C, color.by = "miQC.probability") + ggplot2::scale_color_gradient(low = "grey", high = "purple")+ggtitle("NT-C")
+PlotMiQC(NT_C, color.by = "miQC.keep")+ggtitle("NT-C")
+```
+```{r}
+table(NT_C$miQC.keep)
+```
+
+
+```{r}
+Idents(NT_C) <- "NT-C"
+VlnPlot(NT_C,features = c("percent.mt","nFeature_RNA_log10","nCount_RNA_log10"), split.by = "miQC.keep",split.plot = T, layer = "counts")
+```
+
+```{r}
+miQC_kept <- subset(NT_C, miQC.keep == "keep")
+VlnPlot(miQC_kept,features = c("percent.mt","nFeature_RNA_log10","nCount_RNA_log10"), split.by = "miQC.keep",split.plot = T, layer = "counts")
+```
+
+### NT_KO
+
+```{r}
+NT_KO <- RunMiQC(NT_KO, percent.mt = "percent.mt", nFeature_RNA = "nFeature_RNA", posterior.cutoff = 0.8,
+               model.slot = "flexmix_model")
+PlotMiQC(NT_KO, color.by = "miQC.probability") + ggplot2::scale_color_gradient(low = "grey", high = "purple")+ggtitle("NT-KO")
+PlotMiQC(NT_KO, color.by = "miQC.keep")+ggtitle("NT-KO")
+```
+```{r}
+table(NT_KO$miQC.keep)
+```
+
+```{r}
+Idents(NT_KO) <- "NT-KO"
+VlnPlot(NT_KO,features = c("percent.mt","nFeature_RNA_log10","nCount_RNA_log10"), split.by = "miQC.keep",split.plot = T, layer = "counts")
+```
+
+```{r}
+miQC_kept <- subset(NT_KO, miQC.keep == "keep")
+Idents(miQC_kept) <- "NT-KO: miQC_kept"
+VlnPlot(miQC_kept,features = c("percent.mt","nFeature_RNA_log10","nCount_RNA_log10"), layer = "counts")
+```
+
+### T_C
+
+```{r}
+T_C <- RunMiQC(T_C, percent.mt = "percent.mt", nFeature_RNA = "nFeature_RNA", posterior.cutoff = 0.8,
+               model.slot = "flexmix_model")
+PlotMiQC(T_C, color.by = "miQC.probability") + ggplot2::scale_color_gradient(low = "grey", high = "purple")+ggtitle("T_C")
+PlotMiQC(T_C, color.by = "miQC.keep")+ggtitle("T_C")
+```
+
+```{r}
+table(T_C$miQC.keep)
+```
+
+```{r}
+Idents(T_C) <- "T_C"
+VlnPlot(T_C,features = c("percent.mt","nFeature_RNA_log10","nCount_RNA_log10"), split.by = "miQC.keep",split.plot = T, layer = "counts")
+```
+
+```{r}
+miQC_kept <- subset(T_C, miQC.keep == "keep")
+Idents(miQC_kept) <- "T_C: miQC_kept"
+VlnPlot(miQC_kept,features = c("percent.mt","nFeature_RNA_log10","nCount_RNA_log10"), layer = "counts")
+```
+
+### T_KO
+
+```{r}
+T_KO <- RunMiQC(T_KO, percent.mt = "percent.mt", nFeature_RNA = "nFeature_RNA", posterior.cutoff = 0.8,
+               model.slot = "flexmix_model")
+PlotMiQC(T_KO, color.by = "miQC.probability") + ggplot2::scale_color_gradient(low = "grey", high = "purple")+ggtitle("T_KO")
+PlotMiQC(T_KO, color.by = "miQC.keep")+ggtitle("T_KO")
+```
+
+```{r}
+table(T_KO$miQC.keep)
+```
+
+```{r}
+Idents(T_KO) <- "T_KO"
+VlnPlot(T_KO,features = c("percent.mt","nFeature_RNA_log10","nCount_RNA_log10"), split.by = "miQC.keep",split.plot = T, layer = "counts")
+```
+
+```{r}
+miQC_kept <- subset(T_KO, miQC.keep == "keep")
+Idents(miQC_kept) <- "T_KO: miQC_kept"
+VlnPlot(miQC_kept,features = c("percent.mt","nFeature_RNA_log10","nCount_RNA_log10"), layer = "counts")
+```
+
+## Trim cells by mt.percent first
+
+### Try 5%
+
+#### NT-C
+
+```{r}
+NT_C <- subset(NT_C, subset = percent.mt < 5)
+paste0("The current number of cells from NT-C is :", ncol(NT_C[["RNA"]]$counts),". Was 2546")
+VlnPlot(NT_C,features = c("percent.mt","nFeature_RNA_log10","nCount_RNA_log10"), split.by = "miQC.keep",split.plot = T, layer = "counts")
+```
+
+```{r}
+VlnPlot(NT_C,features = c("percent.mt","nFeature_RNA_log10","nCount_RNA_log10"), layer = "counts")
+```
+
+#### NT-KO
+
+```{r}
+NT_KO <- subset(NT_KO, subset = percent.mt < 5)
+paste0("The current number of cells from NT-KO is :", ncol(NT_KO[["RNA"]]$counts),". Was 3390")
+VlnPlot(NT_KO,features = c("percent.mt","nFeature_RNA_log10","nCount_RNA_log10"), split.by = "miQC.keep",split.plot = T, layer = "counts")
+VlnPlot(NT_KO,features = c("percent.mt","nFeature_RNA_log10","nCount_RNA_log10"), layer = "counts")
+```
+#### T-C
+
+
+```{r}
+T_C <- subset(T_C, subset = percent.mt < 5)
+paste0("The current number of cells from T_C is :", ncol(T_C[["RNA"]]$counts),". Was 6919")
+VlnPlot(T_C,features = c("percent.mt","nFeature_RNA_log10","nCount_RNA_log10"), split.by = "miQC.keep",split.plot = T, layer = "counts")
+VlnPlot(T_C,features = c("percent.mt","nFeature_RNA_log10","nCount_RNA_log10"), layer = "counts")
+```
+#### T-KO
+
+
+```{r}
+T_KO <- subset(T_KO, subset = percent.mt < 5)
+paste0("The current number of cells from T_C is :", ncol(T_KO[["RNA"]]$counts),". Was 8092")
+VlnPlot(T_KO,features = c("percent.mt","nFeature_RNA_log10","nCount_RNA_log10"), split.by = "miQC.keep",split.plot = T, layer = "counts")
+VlnPlot(T_KO,features = c("percent.mt","nFeature_RNA_log10","nCount_RNA_log10"), layer = "counts")
+```
+
+## Processing single sample 
+
+### NT-C
+
+```{r}
+NT_C <- NormalizeData(object = NT_C, normalization.method = "LogNormalize", scale.factor = 10000)
+NT_C <- FindVariableFeatures(object = NT_C, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(NT_C) <-  VariableFeatures(NT_C)[!grepl("^TRA|^TRB|^IGH|^IGK|MAMU-A", VariableFeatures(NT_C))]
+VariableFeaturePlot(NT_C)
+```
+
+```{r}
+NT_C <- ScaleData(object = NT_C, features = VariableFeatures(object = NT_C), vars.to.regress = c("nCount_RNA", "percent.mt"))
+```
+
+```{r}
+NT_C <- RunPCA(NT_C,features =  VariableFeatures(object = NT_C))
+NT_C <- RunUMAP(NT_C, dims = 1:10)
+```
+
+```{r}
+FeaturePlot(NT_C,features = c("percent.mt","nFeature_RNA_log10"),reduction = "umap")
+```
+
+
+```{r}
+FeaturePlot(NT_C,features = c("percent.mt","nCount_RNA_log10"),reduction = "umap")
+```
+
+```{r}
+NT_C <- FindNeighbors(object = NT_C, dims = 1:10)              
+NT_C <- FindClusters(object = NT_C, resolution = 0.1)
+DimPlot(NT_C,reduction = "umap")
+```
+```{r eval=F}
+save(NT_C, file = paste0(outdir,"NT_C.Robj"))
+```
+
+### NT-KO
+
+```{r}
+NT_KO <- NormalizeData(object = NT_KO, normalization.method = "LogNormalize", scale.factor = 10000)
+NT_KO <- FindVariableFeatures(object = NT_KO, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(NT_KO) <-  VariableFeatures(NT_KO)[!grepl("^TRA|^TRB|^IGH|^IGK|MAMU-A", VariableFeatures(NT_KO))]
+VariableFeaturePlot(NT_KO)
+```
+
+```{r}
+NT_KO <- ScaleData(object = NT_KO, features = VariableFeatures(object = NT_KO), vars.to.regress = c("nCount_RNA", "percent.mt"))
+```
+
+```{r}
+NT_KO <- RunPCA(NT_KO,features =  VariableFeatures(object = NT_KO))
+NT_KO <- RunUMAP(NT_KO, dims = 1:10)
+```
+
+```{r}
+FeaturePlot(NT_KO,features = c("percent.mt","nFeature_RNA_log10"),reduction = "umap")
+```
+
+```{r}
+FeaturePlot(NT_KO,features = c("percent.mt","nCount_RNA_log10"),reduction = "umap")
+```
+
+```{r}
+NT_KO <- FindNeighbors(object = NT_KO, dims = 1:10)              
+NT_KO <- FindClusters(object = NT_KO, resolution = 0.1)
+DimPlot(NT_KO,reduction = "umap")
+```
+
+```{r eval=F}
+save(NT_KO, file = paste0(outdir,"NT_KO.Robj"))
+```
+
+### T-C
+
+```{r}
+T_C <- NormalizeData(object = T_C, normalization.method = "LogNormalize", scale.factor = 10000)
+T_C <- FindVariableFeatures(object = T_C, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(T_C) <-  VariableFeatures(T_C)[!grepl("^TRA|^TRB|^IGH|^IGK|MAMU-A", VariableFeatures(T_C))]
+VariableFeaturePlot(T_C)
+```
+
+```{r}
+T_C <- ScaleData(object = T_C, features = VariableFeatures(object = T_C), vars.to.regress = c("nCount_RNA", "percent.mt"))
+```
+
+```{r}
+T_C <- RunPCA(T_C,features =  VariableFeatures(object = T_C))
+T_C <- RunUMAP(T_C, dims = 1:10)
+```
+
+```{r}
+FeaturePlot(T_C,features = c("percent.mt","nFeature_RNA_log10"),reduction = "umap")
+```
+
+```{r}
+FeaturePlot(T_C,features = c("percent.mt","nCount_RNA_log10"),reduction = "umap")
+```
+
+```{r}
+T_C <- FindNeighbors(object = T_C, dims = 1:10)              
+T_C <- FindClusters(object = T_C, resolution = 0.1)
+
+```
+
+```{r}
+DimPlot(T_C,reduction = "umap")
+```
+
+
+```{r eval=F}
+save(T_C, file = paste0(outdir,"T_C.Robj"))
+```
+
+### T-KO
+
+```{r}
+T_KO <- NormalizeData(object = T_KO, normalization.method = "LogNormalize", scale.factor = 10000)
+T_KO <- FindVariableFeatures(object = T_KO, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(T_KO) <-  VariableFeatures(T_KO)[!grepl("^TRA|^TRB|^IGH|^IGK|MAMU-A", VariableFeatures(T_KO))]
+VariableFeaturePlot(T_KO)
+```
+
+```{r}
+T_KO <- ScaleData(object = T_KO, features = VariableFeatures(object = T_KO), vars.to.regress = c("nCount_RNA", "percent.mt"))
+```
+
+```{r}
+T_KO <- RunPCA(T_KO,features =  VariableFeatures(object = T_KO))
+T_KO <- RunUMAP(T_KO, dims = 1:10)
+```
+
+
+```{r}
+FeaturePlot(T_KO,features = c("percent.mt","nFeature_RNA_log10"),reduction = "umap")
+```
+
+```{r}
+FeaturePlot(T_KO,features = c("percent.mt","nCount_RNA_log10"),reduction = "umap")
+```
+
+```{r}
+T_KO <- FindNeighbors(object = T_KO, dims = 1:10)              
+T_KO <- FindClusters(object = T_KO, resolution = 0.1)
+DimPlot(T_KO,reduction = "umap")
+```
+
+```{r eval=F}
+save(T_KO, file = paste0(outdir,"T_KO.Robj"))
+```
+
+
+## Merge into whole object
+
+```{r}
+whole <- merge(x=NT_C,y=c(NT_KO,T_C,T_KO),add.cell.ids=c("NT_C","NT_KO","T_C","T_KO"))
+```
+
+
+```{r }
+NTC_range = range(grep("^NT_C",rownames(whole@meta.data)))
+
+whole@meta.data$orig.ident[NTC_range[1]:NTC_range[2]] <- "NT_C"
+
+NTKO_range = range(grep("^NT_KO",rownames(whole@meta.data)))
+
+whole@meta.data$orig.ident[NTKO_range[1]:NTKO_range[2]] <- "NT_KO"
+
+TC_range = range(grep("^T_C",rownames(whole@meta.data)))
+
+whole@meta.data$orig.ident[TC_range[1]:TC_range[2]] <- "T_C"
+
+TKO_range = range(grep("^T_KO",rownames(whole@meta.data)))
+
+whole@meta.data$orig.ident[TKO_range[1]:TKO_range[2]] <- "T_KO"
+```
+
+```{r }
+table(whole@meta.data$orig.ident)
+```
+
+```{r}
+VlnPlot(whole,features = c("percent.mt","nFeature_RNA_log10","nCount_RNA_log10"),group.by = "orig.ident")
+```
+
+
+```{r eval=F}
+save(whole,file = paste0(outdir,"whole.Robj"))
+```
+
+
+# Perform doublet finder and merge new version
+
+---
+title: "doublet removal"
+output: html_document
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony)
+library(DoubletFinder)
+library(miQC)
+library(SoupX)
+library(data.table)
+library(SeuratWrappers) #For miQC
+```
+
+```{r}
+indir = "./R_outs/"
+outdir = "./R_outs/"
+```
+
+```{r load data}
+load(paste0(outdir,"NT_C.Robj"))
+load(paste0(outdir,"NT_KO.Robj"))
+load(paste0(outdir,"T_C.Robj"))
+load(paste0(outdir,"T_KO.Robj"))
+```
+
+```{r DoubletFinder functions}
+paramSweep <- function(seu, PCs=1:10, sct = FALSE, num.cores=1) {
+  require(Seurat); require(fields); require(parallel)
+  ## Set pN-pK param sweep ranges
+  pK <- c(0.0005, 0.001, 0.005, seq(0.01,0.3,by=0.01))
+  pN <- seq(0.05,0.3,by=0.05)
+
+  ## Remove pK values with too few cells
+  min.cells <- round(nrow(seu@meta.data)/(1-0.05) - nrow(seu@meta.data))
+  pK.test <- round(pK*min.cells)
+  pK <- pK[which(pK.test >= 1)]
+
+  ## Extract pre-processing parameters from original data analysis workflow
+  orig.commands <- seu@commands
+
+  ## Down-sample cells to 10000 (when applicable) for computational effiency
+  if (nrow(seu@meta.data) > 10000) {
+    real.cells <- rownames(seu@meta.data)[sample(1:nrow(seu@meta.data), 10000, replace=FALSE)]
+    data <- seu[["RNA"]]$counts[ , real.cells]
+    n.real.cells <- ncol(data)
+  }
+
+  if (nrow(seu@meta.data) <= 10000){
+    real.cells <- rownames(seu@meta.data)
+    data <- seu[["RNA"]]$counts
+    n.real.cells <- ncol(data)
+  }
+
+  ## Iterate through pN, computing pANN vectors at varying pK
+  #no_cores <- detectCores()-1
+  if(num.cores>1){
+    require(parallel)
+    cl <- makeCluster(num.cores)
+    output2 <- mclapply(as.list(1:length(pN)),
+                        FUN = parallel_paramSweep,
+                        n.real.cells,
+                        real.cells,
+                        pK,
+                        pN,
+                        data,
+                        orig.commands,
+                        PCs,
+                        sct,mc.cores=num.cores)
+    stopCluster(cl)
+  }else{
+    output2 <- lapply(as.list(1:length(pN)),
+                      FUN = parallel_paramSweep,
+                      n.real.cells,
+                      real.cells,
+                      pK,
+                      pN,
+                      data,
+                      orig.commands,
+                      PCs,
+                      sct)
+  }
+
+  ## Write parallelized output into list
+  sweep.res.list <- list()
+  list.ind <- 0
+  for(i in 1:length(output2)){
+    for(j in 1:length(output2[[i]])){
+      list.ind <- list.ind + 1
+      sweep.res.list[[list.ind]] <- output2[[i]][[j]]
+    }
+  }
+
+  ## Assign names to list of results
+  name.vec <- NULL
+  for (j in 1:length(pN)) {
+    name.vec <- c(name.vec, paste("pN", pN[j], "pK", pK, sep = "_" ))
+  }
+  names(sweep.res.list) <- name.vec
+  return(sweep.res.list)
+
+}
+
+doubletFinder <- function(seu, PCs, pN = 0.25, pK, nExp, reuse.pANN = FALSE, sct = FALSE, annotations = NULL) {
+  require(Seurat); require(fields); require(KernSmooth)
+
+  ## Generate new list of doublet classificatons from existing pANN vector to save time
+  if (reuse.pANN != FALSE ) {
+    pANN.old <- seu@meta.data[ , reuse.pANN]
+    classifications <- rep("Singlet", length(pANN.old))
+    classifications[order(pANN.old, decreasing=TRUE)[1:nExp]] <- "Doublet"
+    seu@meta.data[, paste("DF.classifications",pN,pK,nExp,sep="_")] <- classifications
+    return(seu)
+  }
+
+  if (reuse.pANN == FALSE) {
+    ## Make merged real-artifical data
+    real.cells <- rownames(seu@meta.data)
+    data <- seu[["RNA"]]$counts[, real.cells]
+    n_real.cells <- length(real.cells)
+    n_doublets <- round(n_real.cells/(1 - pN) - n_real.cells)
+    print(paste("Creating",n_doublets,"artificial doublets...",sep=" "))
+    real.cells1 <- sample(real.cells, n_doublets, replace = TRUE)
+    real.cells2 <- sample(real.cells, n_doublets, replace = TRUE)
+    doublets <- (data[, real.cells1] + data[, real.cells2])/2
+    colnames(doublets) <- paste("X", 1:n_doublets, sep = "")
+    data_wdoublets <- cbind(data, doublets)
+    # Keep track of the types of the simulated doublets
+    if(!is.null(annotations)){
+      stopifnot(typeof(annotations)=="character")
+      stopifnot(length(annotations)==length(Cells(seu)))
+      stopifnot(!any(is.na(annotations)))
+      annotations <- factor(annotations)
+      names(annotations) <- Cells(seu)
+      doublet_types1 <- annotations[real.cells1]
+      doublet_types2 <- annotations[real.cells2]
+    }
+    ## Store important pre-processing information
+    orig.commands <- seu@commands
+
+    ## Pre-process Seurat object
+    if (sct == FALSE) {
+      print("Creating Seurat object...")
+      seu_wdoublets <- CreateSeuratObject(counts = data_wdoublets)
+
+      print("Normalizing Seurat object...")
+      seu_wdoublets <- NormalizeData(seu_wdoublets,
+                                     normalization.method = orig.commands$NormalizeData.RNA@params$normalization.method,
+                                     scale.factor = orig.commands$NormalizeData.RNA@params$scale.factor,
+                                     margin = orig.commands$NormalizeData.RNA@params$margin)
+
+      print("Finding variable genes...")
+      seu_wdoublets <- FindVariableFeatures(seu_wdoublets,
+                                            selection.method = orig.commands$FindVariableFeatures.RNA$selection.method,
+                                            loess.span = orig.commands$FindVariableFeatures.RNA$loess.span,
+                                            clip.max = orig.commands$FindVariableFeatures.RNA$clip.max,
+                                            mean.function = orig.commands$FindVariableFeatures.RNA$mean.function,
+                                            dispersion.function = orig.commands$FindVariableFeatures.RNA$dispersion.function,
+                                            num.bin = orig.commands$FindVariableFeatures.RNA$num.bin,
+                                            binning.method = orig.commands$FindVariableFeatures.RNA$binning.method,
+                                            nfeatures = orig.commands$FindVariableFeatures.RNA$nfeatures,
+                                            mean.cutoff = orig.commands$FindVariableFeatures.RNA$mean.cutoff,
+                                            dispersion.cutoff = orig.commands$FindVariableFeatures.RNA$dispersion.cutoff)
+
+      print("Scaling data...")
+      seu_wdoublets <- ScaleData(seu_wdoublets,
+                                 features = orig.commands$ScaleData.RNA$features,
+                                 model.use = orig.commands$ScaleData.RNA$model.use,
+                                 do.scale = orig.commands$ScaleData.RNA$do.scale,
+                                 do.center = orig.commands$ScaleData.RNA$do.center,
+                                 scale.max = orig.commands$ScaleData.RNA$scale.max,
+                                 block.size = orig.commands$ScaleData.RNA$block.size,
+                                 min.cells.to.block = orig.commands$ScaleData.RNA$min.cells.to.block)
+
+      print("Running PCA...")
+      seu_wdoublets <- RunPCA(seu_wdoublets,
+                              features = orig.commands$ScaleData.RNA$features,
+                              npcs = length(PCs),
+                              rev.pca =  orig.commands$RunPCA.RNA$rev.pca,
+                              weight.by.var = orig.commands$RunPCA.RNA$weight.by.var,
+                              verbose=FALSE)
+      pca.coord <- seu_wdoublets@reductions$pca@cell.embeddings[ , PCs]
+      cell.names <- rownames(seu_wdoublets@meta.data)
+      nCells <- length(cell.names)
+      rm(seu_wdoublets); gc() # Free up memory
+    }
+
+    if (sct == TRUE) {
+      require(sctransform)
+      print("Creating Seurat object...")
+      seu_wdoublets <- CreateSeuratObject(counts = data_wdoublets)
+
+      print("Running SCTransform...")
+      seu_wdoublets <- SCTransform(seu_wdoublets)
+
+      print("Running PCA...")
+      seu_wdoublets <- RunPCA(seu_wdoublets, npcs = length(PCs))
+      pca.coord <- seu_wdoublets@reductions$pca@cell.embeddings[ , PCs]
+      cell.names <- rownames(seu_wdoublets@meta.data)
+      nCells <- length(cell.names)
+      rm(seu_wdoublets); gc()
+    }
+
+    ## Compute PC distance matrix
+    print("Calculating PC distance matrix...")
+    dist.mat <- fields::rdist(pca.coord)
+
+    ## Compute pANN
+    print("Computing pANN...")
+    pANN <- as.data.frame(matrix(0L, nrow = n_real.cells, ncol = 1))
+    if(!is.null(annotations)){
+      neighbor_types <- as.data.frame(matrix(0L, nrow = n_real.cells, ncol = length(levels(doublet_types1))))
+    }
+    rownames(pANN) <- real.cells
+    colnames(pANN) <- "pANN"
+    k <- round(nCells * pK)
+    for (i in 1:n_real.cells) {
+      neighbors <- order(dist.mat[, i])
+      neighbors <- neighbors[2:(k + 1)]
+      pANN$pANN[i] <- length(which(neighbors > n_real.cells))/k
+      if(!is.null(annotations)){
+        for(ct in unique(annotations)){
+          neighbors_that_are_doublets = neighbors[neighbors>n_real.cells]
+          if(length(neighbors_that_are_doublets) > 0){
+            neighbor_types[i,] <-
+              table( doublet_types1[neighbors_that_are_doublets - n_real.cells] ) +
+              table( doublet_types2[neighbors_that_are_doublets - n_real.cells] )
+            neighbor_types[i,] <- neighbor_types[i,] / sum( neighbor_types[i,] )
+          } else {
+            neighbor_types[i,] <- NA
+          }
+        }
+      }
+    }
+    print("Classifying doublets..")
+    classifications <- rep("Singlet",n_real.cells)
+    classifications[order(pANN$pANN[1:n_real.cells], decreasing=TRUE)[1:nExp]] <- "Doublet"
+    seu@meta.data[, paste("pANN",pN,pK,nExp,sep="_")] <- pANN[rownames(seu@meta.data), 1]
+    seu@meta.data[, paste("DF.classifications",pN,pK,nExp,sep="_")] <- classifications
+    if(!is.null(annotations)){
+      colnames(neighbor_types) = levels(doublet_types1)
+      for(ct in levels(doublet_types1)){
+        seu@meta.data[, paste("DF.doublet.contributors",pN,pK,nExp,ct,sep="_")] <- neighbor_types[,ct]
+      }
+    }
+    return(seu)
+  }
+}
+parallel_paramSweep <- function(n, n.real.cells, real.cells, pK, pN, data, orig.commands, PCs, sct)  {
+
+  sweep.res.list = list()
+  list.ind = 0
+
+  ## Make merged real-artifical data
+  print(paste("Creating artificial doublets for pN = ", pN[n]*100,"%",sep=""))
+  n_doublets <- round(n.real.cells/(1 - pN[n]) - n.real.cells)
+  real.cells1 <- sample(real.cells, n_doublets, replace = TRUE)
+  real.cells2 <- sample(real.cells, n_doublets, replace = TRUE)
+  doublets <- (data[, real.cells1] + data[, real.cells2])/2
+  colnames(doublets) <- paste("X", 1:n_doublets, sep = "")
+  data_wdoublets <- cbind(data, doublets)
+
+  ## Pre-process Seurat object
+  if (sct == FALSE) {
+    print("Creating Seurat object...")
+    seu_wdoublets <- CreateSeuratObject(counts = data_wdoublets)
+
+    print("Normalizing Seurat object...")
+    seu_wdoublets <- NormalizeData(seu_wdoublets,
+                                   normalization.method = orig.commands$NormalizeData.RNA@params$normalization.method,
+                                   scale.factor = orig.commands$NormalizeData.RNA@params$scale.factor,
+                                   margin = orig.commands$NormalizeData.RNA@params$margin)
+
+    print("Finding variable genes...")
+    seu_wdoublets <- FindVariableFeatures(seu_wdoublets,
+                                          selection.method = orig.commands$FindVariableFeatures.RNA$selection.method,
+                                          loess.span = orig.commands$FindVariableFeatures.RNA$loess.span,
+                                          clip.max = orig.commands$FindVariableFeatures.RNA$clip.max,
+                                          mean.function = orig.commands$FindVariableFeatures.RNA$mean.function,
+                                          dispersion.function = orig.commands$FindVariableFeatures.RNA$dispersion.function,
+                                          num.bin = orig.commands$FindVariableFeatures.RNA$num.bin,
+                                          binning.method = orig.commands$FindVariableFeatures.RNA$binning.method,
+                                          nfeatures = orig.commands$FindVariableFeatures.RNA$nfeatures,
+                                          mean.cutoff = orig.commands$FindVariableFeatures.RNA$mean.cutoff,
+                                          dispersion.cutoff = orig.commands$FindVariableFeatures.RNA$dispersion.cutoff)
+
+    print("Scaling data...")
+    seu_wdoublets <- ScaleData(seu_wdoublets,
+                               features = orig.commands$ScaleData.RNA$features,
+                               model.use = orig.commands$ScaleData.RNA$model.use,
+                               do.scale = orig.commands$ScaleData.RNA$do.scale,
+                               do.center = orig.commands$ScaleData.RNA$do.center,
+                               scale.max = orig.commands$ScaleData.RNA$scale.max,
+                               block.size = orig.commands$ScaleData.RNA$block.size,
+                               min.cells.to.block = orig.commands$ScaleData.RNA$min.cells.to.block)
+
+    print("Running PCA...")
+    seu_wdoublets <- RunPCA(seu_wdoublets,
+                            features = orig.commands$ScaleData.RNA$features,
+                            npcs = length(PCs),
+                            rev.pca =  orig.commands$RunPCA.RNA$rev.pca,
+                            weight.by.var = orig.commands$RunPCA.RNA$weight.by.var,
+                            verbose=FALSE)
+  }
+
+  if (sct == TRUE) {
+    require(sctransform)
+    print("Creating Seurat object...")
+    seu_wdoublets <- CreateSeuratObject(counts = data_wdoublets)
+
+    print("Running SCTransform...")
+    seu_wdoublets <- SCTransform(seu_wdoublets)
+
+    print("Running PCA...")
+    seu_wdoublets <- RunPCA(seu_wdoublets, npcs = length(PCs))
+  }
+
+  ## Compute PC distance matrix
+  print("Calculating PC distance matrix...")
+  nCells <- nrow(seu_wdoublets@meta.data)
+  pca.coord <- seu_wdoublets@reductions$pca@cell.embeddings[ , PCs]
+  rm(seu_wdoublets)
+  gc()
+  dist.mat <- fields::rdist(pca.coord)[,1:n.real.cells]
+
+  ## Pre-order PC distance matrix prior to iterating across pK for pANN computations
+  print("Defining neighborhoods...")
+  for (i in 1:n.real.cells) {
+    dist.mat[,i] <- order(dist.mat[,i])
+  }
+
+  ## Trim PC distance matrix for faster manipulations
+  ind <- round(nCells * max(pK))+5
+  dist.mat <- dist.mat[1:ind, ]
+
+  ## Compute pANN across pK sweep
+  print("Computing pANN across all pK...")
+  for (k in 1:length(pK)) {
+    print(paste("pK = ", pK[k], "...", sep = ""))
+    pk.temp <- round(nCells * pK[k])
+    pANN <- as.data.frame(matrix(0L, nrow = n.real.cells, ncol = 1))
+    colnames(pANN) <- "pANN"
+    rownames(pANN) <- real.cells
+    list.ind <- list.ind + 1
+
+    for (i in 1:n.real.cells) {
+      neighbors <- dist.mat[2:(pk.temp + 1),i]
+      pANN$pANN[i] <- length(which(neighbors > n.real.cells))/pk.temp
+    }
+
+    sweep.res.list[[list.ind]] <- pANN
+
+  }
+
+  return(sweep.res.list)
+}
+```
+
+## NT_C
+
+```{r NT_C sweep}
+sweep.res.list <- paramSweep(NT_C, PCs = 1:30, sct = FALSE)
+
+
+sweep.stats <- summarizeSweep(sweep.res.list, GT = FALSE)
+
+
+
+
+bcmvn <- find.pK(sweep.stats)
+
+
+homotypic.prop <- modelHomotypic(NT_C@meta.data$seurat_clusters)          
+nExp_poi <- round(0.05*nrow( NT_C@meta.data))  ## Assuming 5% doublet formation rate 
+nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop))
+
+```
+
+```{r}
+ NT_C <- doubletFinder( NT_C, PCs = 1:30, pN = 0.25, pK = 0.09, nExp = nExp_poi, reuse.pANN = FALSE, sct = FALSE)
+
+head(NT_C@meta.data) # This is too much for whole
+
+
+```
+
+```{r}
+FeaturePlot( NT_C,features = "pANN_0.25_0.09_122",reduction = "umap")
+DimPlot(NT_C,reduction = "umap",group.by = "DF.classifications_0.25_0.09_122")
+FeaturePlot( NT_C,features = "Cd4",reduction = "umap")
+FeaturePlot( NT_C,features = "Cd8a",reduction = "umap")
+```
+```{r}
+NT_C <- subset(NT_C,subset = DF.classifications_0.25_0.09_122 == "Singlet")
+```
+
+```{r}
+save(NT_C,file = paste0(outdir,"NT_C_doubRemoved.Robj"))
+```
+
+## NT_KO
+
+```{r NT_KO sweep}
+sweep.res.list <- paramSweep(NT_KO, PCs = 1:30, sct = FALSE)
+
+
+sweep.stats <- summarizeSweep(sweep.res.list, GT = FALSE)
+
+
+
+
+bcmvn <- find.pK(sweep.stats)
+
+
+homotypic.prop <- modelHomotypic(NT_KO@meta.data$seurat_clusters)          
+nExp_poi <- round(0.05*nrow( NT_KO@meta.data))  ## Assuming 5% doublet formation rate 
+nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop))
+
+NT_KO <- doubletFinder( NT_KO, PCs = 1:30, pN = 0.25, pK = 0.09, nExp = nExp_poi, reuse.pANN = FALSE, sct = FALSE)
+
+head(NT_KO@meta.data) # This is too much for whole
+
+
+```
+
+
+```{r}
+FeaturePlot( NT_KO,features = "pANN_0.25_0.09_163",reduction = "umap")
+DimPlot(NT_KO,reduction = "umap",group.by = "DF.classifications_0.25_0.09_163")
+FeaturePlot( NT_KO,features = "Cd4",reduction = "umap")
+FeaturePlot( NT_KO,features = "Cd8a",reduction = "umap")
+```
+
+```{r}
+NT_KO <- subset(NT_KO,subset = DF.classifications_0.25_0.09_163 == "Singlet")
+```
+
+```{r}
+save(NT_KO,file = paste0(outdir,"NT_KO_doubRemoved.Robj"))
+```
+
+
+## T_C
+
+```{r}
+sweep.res.list <- paramSweep(T_C, PCs = 1:30, sct = FALSE)
+
+
+sweep.stats <- summarizeSweep(sweep.res.list, GT = FALSE)
+
+
+
+
+bcmvn <- find.pK(sweep.stats)
+
+
+homotypic.prop <- modelHomotypic(T_C@meta.data$seurat_clusters)          
+nExp_poi <- round(0.05*nrow(T_C@meta.data))  ## Assuming 5% doublet formation rate 
+nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop))
+
+T_C <- doubletFinder(T_C, PCs = 1:30, pN = 0.25, pK = 0.09, nExp = nExp_poi, reuse.pANN = FALSE, sct = FALSE)
+
+head(T_C@meta.data) # This is too much for whole
+
+```
+
+```{r}
+FeaturePlot(T_C,features = "pANN_0.25_0.09_328",reduction = "umap")
+DimPlot(T_C,reduction = "umap",group.by = "DF.classifications_0.25_0.09_328")
+FeaturePlot(T_C,features = "Cd4",reduction = "umap")
+FeaturePlot(T_C,features = "Cd8a",reduction = "umap")
+```
+
+```{r}
+T_C <- subset(T_C,subset = DF.classifications_0.25_0.09_328 == "Singlet")
+```
+
+```{r}
+save(T_C,file = paste0(outdir,"T_C_doubRemoved.Robj"))
+```
+
+
+
+
+## T_KO
+
+```{r}
+sweep.res.list <- paramSweep(T_KO, PCs = 1:30, sct = FALSE)
+
+
+sweep.stats <- summarizeSweep(sweep.res.list, GT = FALSE)
+
+
+
+
+bcmvn <- find.pK(sweep.stats)
+
+
+homotypic.prop <- modelHomotypic(T_KO@meta.data$seurat_clusters)          
+nExp_poi <- round(0.05*nrow( T_KO@meta.data))  ## Assuming 5% doublet formation rate 
+nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop))
+
+T_KO <- doubletFinder( T_KO, PCs = 1:30, pN = 0.25, pK = 0.09, nExp = nExp_poi, reuse.pANN = FALSE, sct = FALSE)
+
+head(T_KO@meta.data) # This is too much for whole
+
+```
+
+```{r}
+FeaturePlot( T_KO,features = "pANN_0.25_0.09_384",reduction = "umap")
+DimPlot(T_KO,reduction = "umap",group.by = "DF.classifications_0.25_0.09_384")
+FeaturePlot( T_KO,features = "Cd4",reduction = "umap")
+FeaturePlot( T_KO,features = "Cd8a",reduction = "umap")
+```
+
+```{r}
+T_KO <- subset(T_KO,subset = DF.classifications_0.25_0.09_384 == "Singlet")
+```
+
+```{r}
+save(T_KO,file = paste0(outdir,"T_KO_doubRemoved.Robj"))
+```
+
+
+
+## merge and analyze
+
+```{r}
+whole <- merge(x=NT_C,y=c(NT_KO,T_C,T_KO),add.cell.ids=c("NT_C","NT_KO","T_C","T_KO"))
+```
+
+```{r }
+NTC_range = range(grep("^NT_C",rownames(whole@meta.data)))
+
+whole@meta.data$orig.ident[NTC_range[1]:NTC_range[2]] <- "NT_C"
+
+NTKO_range = range(grep("^NT_KO",rownames(whole@meta.data)))
+
+whole@meta.data$orig.ident[NTKO_range[1]:NTKO_range[2]] <- "NT_KO"
+
+TC_range = range(grep("^T_C",rownames(whole@meta.data)))
+
+whole@meta.data$orig.ident[TC_range[1]:TC_range[2]] <- "T_C"
+
+TKO_range = range(grep("^T_KO",rownames(whole@meta.data)))
+
+whole@meta.data$orig.ident[TKO_range[1]:TKO_range[2]] <- "T_KO"
+```
+
+
+```{r}
+whole$DF.classifications_0.25_0.09_122 <- NULL
+whole$DF.classifications_0.25_0.09_163 <- NULL
+whole$DF.classifications_0.25_0.09_328 <- NULL
+whole$DF.classifications_0.25_0.09_384 <- NULL
+```
+
+```{r }
+table(whole@meta.data$orig.ident)
+```
+
+```{r eval=F}
+save(whole,file = paste0(outdir,"whole_DoubletFinder.Robj"))
+```
+
+```{r}
+whole <- NormalizeData(object = whole, normalization.method = "LogNormalize", scale.factor = 10000)
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(whole) <-  VariableFeatures(whole) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(whole))]
+VariableFeaturePlot(whole)
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+```
+
+```{r}
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+whole <- RunUMAP(whole,dims = 1:40,reduction = "harmony")
+whole <- RunTSNE(whole,dims = 1:40,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:40,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r eval=F}
+save(whole,file = paste0(outdir,"whole_DoubletFinder.Robj"))
+```
+
+```{r}
+load(paste0(outdir,"whole_DoubletFinder.Robj"))
+```
+
+```{r}
+DimPlot(whole, reduction = "umap",label = T)
+```
+
+```{r}
+DimPlot(whole, reduction = "umap",label = T,split.by = "orig.ident",ncol = 2)
+
+```
+
+```{r}
+DimPlot(whole, reduction = "umap",group.by = "RNA_snn_res.0.1",label = T)
+```
+
+
+```{r}
+DimPlot(whole, reduction = "umap",group.by = "orig.ident",shuffle = T)
+DimPlot(whole, reduction = "umap",group.by = "RNA_snn_res.0.6",label = T)
+DimPlot(whole, reduction = "umap")
+DimPlot(whole, reduction = "tsne")
+FeaturePlot(whole,features = c("Cd8a"))
+FeaturePlot(whole,features = c("Cd19"))
+DimPlot(whole, reduction = "umap",group.by = "miQC.keep",shuffle = T)
+DotPlot(whole,features = c("Cd3e","Cd8a","Cd4","Cd19","Cd44","Ncam1","Xcr1","Ncr1","Siglech","S100a8","Ccr2","Fcer1a","Fcer2a","Flt3"))+RotatedAxis()
+```
+
+```{r}
+VlnPlot(whole, features = c("percent.mt","nFeature_RNA_log10","nCount_RNA_log10"),group.by = "orig.ident")
+```
+
+```{r}
+DotPlot(whole,features = c("Cd3e","Cd8a","Cd4","Cd19","Lyz2","Fn1","Xcr1","P2ry12","Ncr1","Siglech","S100a8","Mpo","Fcer2a","Flt3","Cd200r3","Gata3","Il7r","Mki67"),group.by = "RNA_snn_res.0.6")+RotatedAxis()
+```
+
+```{r}
+VlnPlot(whole, features = c("Cd3e"),group.by = "RNA_snn_res.0.6")
+Idents(whole) <- whole$RNA_snn_res.0.6
+FeaturePlot(whole,features = c("Cd3e"),label = T)
+```
+
+```{r}
+VlnPlot(whole, features = c("Cd19"),group.by = "RNA_snn_res.0.6")
+Idents(whole) <- whole$RNA_snn_res.0.6
+FeaturePlot(whole,features = c("Cd19"),label = T)
+```
+```{r}
+VlnPlot(whole, features = c("Cd8a"),group.by = "RNA_snn_res.0.6")
+Idents(whole) <- whole$RNA_snn_res.0.6
+FeaturePlot(whole,features = c("Cd8a"),label = T)
+```
+
+```{r}
+VlnPlot(whole, features = c("Ncr1"),group.by = "RNA_snn_res.0.1")
+Idents(whole) <- whole$RNA_snn_res.0.1
+FeaturePlot(whole,features = c("Ncr1"),label = T)
+```
+
+```{r}
+cluster_prop <- whole@meta.data %>% group_by(orig.ident,RNA_snn_res.0.6) %>%
+  summarise(n = n()) %>% mutate(proportion = 100*n/sum(n))
+
+p1 <- ggplot(cluster_prop,aes(x = orig.ident, y = proportion,fill = orig.ident))+
+  geom_bar(stat = "identity", position = 'dodge')+
+  facet_wrap(~RNA_snn_res.0.6,scales = "free")+guides(fill=guide_legend(title="Condition"))+ ylab("Percentage of all cells")+
+  theme(
+  plot.title = element_blank(),
+  axis.title.x = element_blank())+RotatedAxis()
+p1
+g <- gridExtra::grid.arrange(grobs = list(p1),nrow = 2)
+ggsave(filename = paste0(outdir,"Proportion_barplots_res06_whole_DF_V2.pdf"), plot = g, units = "cm",height = 30,width = 20)
+```
+
+
+```{r}
+T_cells <- subset(whole, idents = c(0,1,2,4,5,7,8,12,13,17))
+save(T_cells,file = paste0(outdir,"T_cells_DF_res06.Robj"))
+```
+
+
+# **Archived** version of second round QC:
+
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony)
+```
+
+```{r}
+indir = "./R_outs/" #Can be made into a command-line input
+outdir = "./R_outs/"
+```
+
+```{r}
+load(paste0(outdir,"whole.Robj"))
+```
+
+## run the usual pipeline
+
+```{r}
+table(whole@meta.data$orig.ident)
+```
+
+```{r}
+ggplot(whole@meta.data)+
+  geom_histogram(aes(x=percent.mt,y = after_stat(width*density*100)),bins = 100)+
+  facet_wrap(vars(orig.ident),ncol=1)+
+  geom_vline(xintercept = 5,col="red") +
+  ylab("proportion")+
+  xlab("percentage of mitochondrial RNA")
+```
+
+```{r}
+ggplot(whole@meta.data, aes(x = log10(nFeature_RNA))) +
+  geom_histogram(bins = 100, aes(y = after_stat(width*density*100))) +
+  theme_classic() +
+  facet_wrap(~orig.ident, ncol = 1) +
+  geom_vline(xintercept = 2.5,col="red") + 
+  geom_vline(xintercept = 4,col="red") + 
+  ggtitle("nGene") +
+  ylab("")
+```
+
+```{r}
+ggplot(whole@meta.data, aes(x = log10(nCount_RNA))) +
+  geom_histogram(bins = 100, aes(y = after_stat(width*density*100))) +
+  theme_classic() +
+  facet_wrap(~orig.ident, ncol = 1) +
+  geom_vline(xintercept = 2.5,col="red") + 
+  geom_vline(xintercept = 4.5,col="red") + 
+  ggtitle("nCount") +
+  ylab("")
+```
+
+
+```{r}
+#whole <- NormalizeData(object = whole, normalization.method = "LogNormalize", scale.factor = 10000)
+#there is no need to normalize again; normalization is cell specific
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(whole) <-  VariableFeatures(whole) [!grepl("^TRA|^TRB|^IGH|^IGK|MAMU-A", VariableFeatures(whole))]
+VariableFeaturePlot(whole)
+```
+
+
+```{r}
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+```
+
+```{r}
+DimPlot(whole, reduction = "pca",group.by = "orig.ident",dims = c(3,4),shuffle = T)
+```
+
+
+```{r}
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+whole <- RunUMAP(whole,dims = 1:20,reduction = "harmony")
+whole <- RunTSNE(whole,dims = 1:20,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+
+```{r}
+DimPlot(whole, reduction = "umap",group.by = "orig.ident",shuffle = T)
+```
+
+```{r}
+DimPlot(whole, reduction = "umap",group.by = "RNA_snn_res.0.1")
+```
+
+```{r}
+FeaturePlot(whole,features = c("Cd8a"))
+```
+
+```{r}
+DimPlot(whole, reduction = "umap")
+```
+
+
+```{r}
+FeaturePlot(whole,features = c("Cd8a"))
+```
+
+```{r}
+DimPlot(whole, reduction = "umap",group.by = "miQC.keep",shuffle = T)
+```
+
+
+```{r}
+DotPlot(whole,features = c("Cd3e","Cd8a","Cd4","Cd19","Cd44","Ncam1","Xcr1","Ncr1","Siglech","S100a8","Ccr2","Fcer1a","Fcer2a","Flt3"),group.by = "RNA_snn_res.0.1")+RotatedAxis()
+```
+```{r}
+DotPlot(whole,features = c("Cd3e","Cd8a","Cd4","Cd19","Cd44","Ncam1","Xcr1","Ncr1","Siglech","S100a8","Ccr2","Fcer1a","Fcer2a","Flt3"),group.by = "orig.ident")+RotatedAxis()
+```
+
+```{r}
+bulk <- AggregateExpression(whole,group.by = "orig.ident", return.seurat = TRUE)
+Cells(bulk)
+```
+
+```{r}
+DotPlot(bulk,features = c("Cd3e","Cd8a","Cd4","Cd19","Cd44","Ncam1","Xcr1","Ncr1","Siglech","S100a8","Ccr2","Fcer1a","Fcer2a","Flt3"))+RotatedAxis()
+```
+```{r}
+whole <- JoinLayers(whole) #This is seurat 5 specific
+```
+
+
+```{r eval=F}
+save(whole,file = paste0(outdir,"whole_processed_wHarmony.Robj"))
+```
+
+## Jan 5 processing by further trimming down to miQC.keep
+
+
+```{r}
+whole <- subset(whole, subset = miQC.keep=="keep")
+```
+
+
+```{r}
+table(whole$miQC.keep)
+```
+
+
+```{r}
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(whole) <-  VariableFeatures(whole) [!grepl("^Tra|^Trb|^Igh|^Igk|MAMU-A", VariableFeatures(whole))]
+VariableFeaturePlot(whole)
+
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+```
+
+```{r}
+DimPlot(whole, reduction = "pca",group.by = "orig.ident",dims = c(3,4),shuffle = T)
+```
+
+
+```{r}
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+whole <- RunUMAP(whole,dims = 1:20,reduction = "harmony")
+whole <- RunTSNE(whole,dims = 1:20,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DimPlot(whole, reduction = "umap",group.by = "orig.ident",shuffle = T)
+DimPlot(whole, reduction = "umap",group.by = "RNA_snn_res.0.1")
+DimPlot(whole, reduction = "umap")
+```
+
+```{r}
+DotPlot(whole,features = c("Cd3e","Cd8a","Cd4","Cd19","Cd44","Ncam1","Xcr1","Ncr1","Siglech","S100a8","Ccr2","Fcer1a","Fcer2a","Flt3"),group.by = "RNA_snn_res.0.1")+RotatedAxis()
+DotPlot(whole,features = c("Cd3e","Cd8a","Cd4","Cd19","Cd44","Ncam1","Xcr1","Ncr1","Siglech","S100a8","Ccr2","Fcer1a","Fcer2a","Flt3"),group.by = "orig.ident")+RotatedAxis()
+```
+
+```{r}
+save(whole, file = paste0(outdir,"whole_processed_wHarmony_miQC.Robj"))
+```
+

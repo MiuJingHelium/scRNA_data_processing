@@ -1,0 +1,1013 @@
+---
+title: "Pub5 update all plots for convT"
+output: html_document
+date: "2024-08-20"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(RColorBrewer)
+library(harmony)
+```
+
+```{r}
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+
+```
+
+```{r}
+RDSdir <- "../V2_processing_analysis/R_outs/"
+load(paste0(RDSdir,"lymphoid_convT_V3p3_merged_scRep_aa.Robj"))
+```
+
+```{r}
+outdir <- "Fig4_new/"
+if (!dir.exists(outdir)) dir.create(outdir)
+```
+
+# general plots
+
+## conventional T cell UMAP with the subsets
+
+### Direct draw UMAP (annotation done later)
+
+```{r}
+DimPlot(screp.aa,group.by = "RNA_snn_res.0.9",label = T)
+```
+```{r}
+colnames(screp.aa@meta.data)
+```
+
+```{r}
+DimPlot(screp.aa,group.by = "celltype",label = T)
+```
+
+
+
+### UMAP plot
+```{r}
+p1 <- DimPlot(screp.aa,group.by = "RNA_snn_res.0.9",label = T,pt.size = 1,label.box = T,label.color = "white",repel = T)+scale_color_manual(values = pal)+scale_fill_manual(values = pal)+guides(color=guide_legend(ncol = 1, position = "right",override.aes = list(size=5)))
+p2 <- DimPlot(screp.aa,group.by = "RNA_snn_res.0.9",label = F,pt.size = 1,label.box = F,label.color = "white",repel = T)+scale_color_manual(values = pal)+scale_fill_manual(values = pal)+guides(color=guide_legend(ncol = 1, position = "right",override.aes = list(size=5)))
+
+g <- gridExtra::grid.arrange(grobs = list(p1,p2),ncol = 2)
+ggsave(paste0(outdir,"/Fig4_conventional_T_cell_UMAP.pdf"),plot = g, width = 18,height = 8)
+```
+
+```{r}
+screp.aa@meta.data <- screp.aa@meta.data %>% mutate(
+  celltype = case_match(
+    as.character(RNA_snn_res.0.9),
+    "0" ~ "CD8T",
+    "1" ~ "CD8T",
+    "2" ~ "NKT",
+    "4" ~ "CD4T",
+    "5" ~ "CD8T",
+    "6" ~ "CD8T",
+    "8" ~ "Proliferating T",
+    "9" ~ "CD4T",
+    "10" ~ "CD4T",
+    "11" ~ "CD8T",
+    "12" ~ "Proliferating T",
+    "13" ~ "Proliferating T",
+    .default = celltype
+  )
+)
+```
+
+
+```{r}
+save(screp.aa,file =  paste0(RDSdir,"lymphoid_convT_V3p3_merged_scRep_aa.Robj"))
+```
+
+### Marker Heatmap
+
+```{r}
+markers <- read.table("SR003099_DF_convT_V3p3_irf8d32tapoe_resolution_0.9_markers.tsv",sep = "\t",header = T)
+```
+
+```{r}
+top_markers <- markers %>% filter(!(gene %in% markers$gene[grep("^Gm|Rik$", markers$gene)])) %>% group_by(cluster) %>% filter(pct.1 > 0.6) %>% slice_max(order_by = c(avg_log2FC), n = 25) %>% ungroup() 
+```
+
+```{r}
+g <- DoHeatmap(screp.aa, features = top_markers$gene,group.by = "RNA_snn_res.0.9",draw.lines = F,size = 5,group.colors = pal,raster = FALSE,disp.max = 1.5,disp.min = -1.5)
+g
+ggsave(filename = paste0(outdir,"/Fig4_marker_heatmap.pdf"),width = 20,height = 20)
+```
+
+### density plot
+
+
+```{r}
+meta <- cbind(screp.aa@meta.data,screp.aa@reductions$umap@cell.embeddings)
+```
+
+```{r}
+g <- ggplot(meta, aes(x = umap_1, y = umap_2)) +
+  geom_point(aes(color = RNA_snn_res.0.9,fill = RNA_snn_res.0.9),alpha = 0.8,size = 0.5,fill = "white") +
+  geom_density_2d_filled(alpha = 0.5) +
+  geom_density_2d(colour = "black",alpha = 0.6)+
+  scale_fill_manual(values = c('white','#ffffd4','#fed976','#feb24c','#fd8d3c','#fc4e2a','#e31a1c','#b10026',"darkred"))+ #
+  scale_color_manual(values = pal)+
+  theme_classic()+
+  facet_wrap(~orig.ident,ncol = 2, scales = "free")+
+ guides(fill = guide_legend(title = "Level",ncol = 2,position = "bottom"),
+        color = guide_legend(ncol = 3,position = "bottom",title = "Cluster",override.aes = list(alpha = 0,shape = "circle")))
+g
+ggsave(filename = paste0(outdir,"/Fig4_density_plot.pdf"),width = 12,height = 10)
+```
+
+```{r}
+g <- ggplot(meta, aes(x = umap_1, y = umap_2)) +
+  geom_point(aes(color = RNA_snn_res.0.9,fill = RNA_snn_res.0.9),alpha = 0.8,size = 0.5,fill = "white") +
+  geom_density_2d(colour = "black",alpha = 0.6)+
+  scale_color_manual(values = pal)+
+  theme_classic()+
+  facet_wrap(~orig.ident,ncol = 2, scales = "free")
+g
+ggsave(filename = paste0(outdir,"/Fig4_density_plot_without_filling.pdf"),plot = g,width = 12,height = 10)
+```
+### celltyppe proportion changes
+
+```{r}
+cluster_prop <- screp.aa@meta.data %>% group_by(orig.ident,RNA_snn_res.0.9) %>% summarise(n = n()) %>% ungroup() %>% group_by(orig.ident) %>% mutate(proportion = n*100/sum(n))
+```
+
+```{r}
+g <- ggplot(cluster_prop)+
+  geom_bar(aes(x = orig.ident, y = proportion, fill = factor(RNA_snn_res.0.9)),stat = "identity", position = "dodge")+
+  scale_fill_manual("Cluster",values = pal)+
+  ylab("% in T cells")+
+  xlab("Cluster")+facet_wrap(~RNA_snn_res.0.9, scales = "free")+theme_classic()+theme(axis.text.x = element_text(angle = 45, hjust = 0.1,vjust = 0.1))
+g
+ggsave(filename = paste0(outdir,"/Fig4_cluster_prop_dodged.pdf"),plot = g,width = 12,height = 10)
+```
+
+
+```{r}
+# calculate within cell type proportions
+table(meta$celltype)
+```
+
+```{r}
+CD4_prop <- meta %>% filter(celltype == "CD4T") %>% group_by(orig.ident,RNA_snn_res.0.9) %>% summarise(n_subpop = n()) %>%
+  ungroup() %>% group_by(orig.ident) %>% mutate(subpop_prop = n_subpop *100/sum(n_subpop))
+```
+
+```{r}
+table(CD4_prop$RNA_snn_res.0.9)
+```
+
+```{r}
+ggplot(CD4_prop) +
+  geom_bar(aes(x = orig.ident,y = subpop_prop, fill = RNA_snn_res.0.9), stat = "identity",position = "stack")+
+  scale_fill_manual(values = pal[c(unique(CD4_prop$RNA_snn_res.0.9))])+theme_classic()
+```
+
+```{r}
+CD8_prop <- meta %>% filter(celltype == "CD8T") %>% group_by(orig.ident,RNA_snn_res.0.9) %>% summarise(n_subpop = n()) %>%
+  ungroup() %>% group_by(orig.ident) %>% mutate(subpop_prop = n_subpop *100/sum(n_subpop))
+table(CD8_prop$RNA_snn_res.0.9)
+```
+```{r}
+ggplot(CD8_prop) +
+  geom_bar(aes(x = orig.ident,y = subpop_prop, fill = RNA_snn_res.0.9), stat = "identity",position = "stack")+
+  scale_fill_manual(values = pal[unique(CD8_prop$RNA_snn_res.0.9)])+theme_classic()
+```
+
+```{r}
+p1 <- ggplot(CD4_prop) +
+  geom_bar(aes(x = orig.ident,y = subpop_prop, fill = RNA_snn_res.0.9), stat = "identity",position = "stack")+
+  scale_fill_manual(values = pal[c(unique(CD4_prop$RNA_snn_res.0.9))])+theme_classic()+xlab("Phenotype")+ylab("% in CD4")
+p2 <- ggplot(CD8_prop) +
+  geom_bar(aes(x = orig.ident,y = subpop_prop, fill = RNA_snn_res.0.9), stat = "identity",position = "stack")+
+  scale_fill_manual(values = pal[unique(CD8_prop$RNA_snn_res.0.9)])+theme_classic()+xlab("Phenotype")+ylab("% in CD8")
+g <- gridExtra::grid.arrange(grobs = list(p1,p2), ncol = 2)
+ggsave(filename = paste0(outdir,"/Fig4_subtype_proportion_bar.pdf"),plot = g,width = 10,height = 6)
+```
+
+stacked all proportion barplot
+
+```{r}
+cluster_prop <- screp.aa@meta.data %>% group_by(orig.ident,RNA_snn_res.0.9) %>% summarise(n = n()) %>% ungroup() %>% group_by(orig.ident) %>% mutate(proportion = n/sum(n)) %>%
+  mutate(labels = scales::percent(proportion))
+```
+
+```{r}
+g <- ggplot(cluster_prop,aes(x = orig.ident, y = proportion, fill = factor(RNA_snn_res.0.9)))+ #geom_bar(,stat = "identity", position = "stack")+
+    geom_col(color = "black")+
+  scale_fill_manual("Cluster",values = pal)+
+  ylab("% in T cells")+
+  xlab("Cluster")+
+  geom_label_repel(aes(x = orig.ident, y = proportion,label = labels),position = position_stack(vjust = 0.5),
+            show.legend = FALSE,max.overlaps = 15)+coord_polar(theta = "y") +
+  theme_void()
+g
+# ggsave(filename = paste0(outdir,"/Fig4_cluster_prop_dodged.pdf"),plot = g,width = 12,height = 10)
+```
+
+
+```{r}
+g <- ggplot(cluster_prop %>% arrange(desc(proportion)) %>%
+              mutate(text_y = cumsum(proportion*100) - proportion*100/2) ,aes(x = "", y = proportion*100, fill = factor(RNA_snn_res.0.9)))+ #geom_bar(,stat = "identity", position = "stack")+
+    geom_col(color = "black")+
+  scale_fill_manual("Cluster",values = pal)+
+  ylab("% in T cells")+
+  xlab("Cluster")+
+  coord_polar(theta = "y") +geom_label_repel(aes(label = labels, y = text_y),nudge_x = 0.6, nudge_y = 0.6,
+            show.legend = FALSE,max.overlaps = 20)+
+  theme_void()+facet_wrap(~orig.ident)
+g
+ggsave(filename = paste0(outdir,"/Fig4_cluster_prop_pie.pdf"),plot = g,width = 12,height = 10)
+```
+
+```{r}
+g <- ggplot(cluster_prop %>% arrange(desc(proportion)) %>% 
+              mutate(text_y = cumsum(proportion*100) - proportion*100/2),aes(x = orig.ident, y = proportion, fill = factor(RNA_snn_res.0.9)))+
+  geom_bar(aes(x = orig.ident, y = proportion*100, fill = factor(RNA_snn_res.0.9)),stat = "identity", position = "stack")+
+  scale_fill_manual("Cluster",values = pal)+ ggrepel::geom_label_repel(aes(label = labels,  y = rev(text_y)))+
+  ylab("% in T cells")+
+  xlab("Cluster")+theme_classic()+theme(axis.text.x = element_text(angle = 45, hjust = 0.1,vjust = 0.1))
+g
+```
+
+
+
+
+## FeaturePlots
+
+```{r}
+genes <- c("Cxcr6","Izumo1r","Ccr7", "Il7r", "Klf2", "Ctla2a", "Ccl5", "Nkg7", "Il2ra", "Il1rl1", "Tnfrsf4", "Hif1a", "Maf", "Sell", "Lef1", "Tcf7", "Itgb1", "Tbx21", "Rnf128", "Ctla4", "Icos", "Cd40lg", "Prdm1", "Tnfrsf18")
+
+```
+
+```{r}
+glist <- lapply(genes, function(x){
+  FeaturePlot(screp.aa,features = x,order = T)+scale_color_gradientn(colors = c("grey90","coral","red2"))
+})
+g <- gridExtra::grid.arrange(grobs = glist, ncol = 4)
+ggsave(filename = paste0(outdir,"/Fig4_T_cell_featureplots_unsplit.pdf"),plot = g,width = 24,height = 24)
+
+
+```
+
+```{r}
+genes <- c("Cd3e", "Cd4", "Cd8b1", "Klrc1", "Gzmk", "Gzmb", "Tox","Pdcd1")
+glist <- lapply(genes, function(x){
+  FeaturePlot(screp.aa,features = x,order = F)+scale_color_gradientn(colors = c("grey90","coral","red2"))
+})
+g <- gridExtra::grid.arrange(grobs = glist, ncol = 4)
+ggsave(filename = paste0(outdir,"/Fig4_T_cell_featureplots_unsplit_set2.pdf"),plot = g,width = 15,height = 6)
+```
+
+
+## DE
+
+### four condition comparison
+
+Let's create a psuedobulk by condition
+
+```{r}
+bulk <- AggregateExpression(screp,group.by = "orig.ident",return.seurat = T)
+```
+
+
+```{r}
+NT_C_bulk <- subset(bulk,subset = orig.ident == "NT-C")
+NT_KO_bulk <- subset(bulk,subset = orig.ident == "NT-KO")
+T_C_bulk <- subset(bulk,subset = orig.ident == "T-C")
+T_KO_bulk <- subset(bulk,subset = orig.ident == "T-KO")
+```
+
+```{r}
+hist(NT_KO_bulk@assays$RNA@layers$data)
+```
+
+
+```{r}
+NT_changes = log2((NT_KO_bulk@assays$RNA@layers$data+1)/(NT_C_bulk@assays$RNA@layers$data+1))
+T_changes = log2((T_KO_bulk@assays$RNA@layers$data+1)/(T_C_bulk@assays$RNA@layers$data+1))
+```
+
+```{r}
+hist(NT_changes)
+```
+
+
+```{r}
+qua_df <- data.frame(NT_fc = NT_changes, T_fc = T_changes,genes = rownames(bulk)) %>% 
+  mutate(labels = case_when(
+    NT_fc < 1 & NT_fc > -1 & T_fc < 1 & T_fc > -1 ~ "constant",
+    .default = "variable"
+
+  ))
+```
+
+```{r}
+ggplot(qua_df)+
+  geom_point(aes(x = NT_fc, y = NT_fc,color = labels))+
+  geom_hline(yintercept = c(-1,1))+
+  geom_vline(xintercept = c(-1,1))+
+  xlab("Average log2fc NT-KO/NT-C")+
+  ylab("Average log2fc T-KO/T-C")
+```
+
+Direct psuedobulk doesn't work
+
+### cross-condition DE
+Let's try directly DE; 
+
+T-C v.s. NT-C
+T-KO v.s. T-C *use the avg log2 FC value here for four qua plot
+NT-KO v.s. NT-C *use the avg log2 FC value here for four qua plot
+
+```{r}
+de_clusters <- function(current_cluster) {
+  groups <- gsub(" ","_",paste0(conditions,"_",current_cluster))
+  both_markers <- FindMarkers(screp, ident.1=groups[1], ident.2=groups[2], test.use="wilcox", min.pct=0.00, logfc.threshold = 0) # change name of object 
+  marker_genes <- row.names(both_markers)
+  mutate(both_markers, gene = marker_genes, cluster = current_cluster)
+}
+```
+
+#### T-C v.s. NT-C 
+
+```{r}
+screp$group <- gsub(" ","_",paste0(screp$orig.ident,"_",screp$annotation_final))
+conditions <- unique(screp$orig.ident)[order(unique(screp$orig.ident))][c(3,1)] # Levels: NT_C NT_KO T_C T_KO
+clusters <- unique(screp$annotation_final)
+plts <- list()
+padj_thres = 10e-2
+log2FC_thres = 1
+Idents(screp) <- screp$group
+```
+
+```{r}
+table(screp$group)
+```
+
+
+```{r}
+
+for (i in clusters) {
+  output_file <- paste0("",paste0("convT_",conditions[1],'_vs_',conditions[2],'_', i, '.tsv'))
+  output_file_flt <- paste0("",paste0("convT_",conditions[1],'_vs_',conditions[2],'_', i, '_filtered.tsv'))
+  volcano_plot_file <- paste0(outdir,paste0("convT_",conditions[1],'_vs_',conditions[2],'_', i, '_volcano.pdf'))
+  de_results_tbl <- lapply(i, de_clusters) 
+  de_results_tbl <- de_results_tbl %>% bind_rows() %>%
+			arrange(desc(abs(avg_log2FC))) %>%
+			mutate(threshold = case_when(
+			(p_val_adj < padj_thres) & (abs(avg_log2FC) > log2FC_thres) ~ "Pass",
+			.default = "Fail"
+			))
+  write.table(de_results_tbl, output_file,sep="\t",row.names=T)
+  
+  g <- ggplot(de_results_tbl,aes(x=avg_log2FC, y = -log10(p_val_adj), label = gene))+
+  geom_point(aes(color = threshold))+
+  geom_vline(xintercept = c(1,-1),color = "red2")+geom_hline(yintercept = 1.3, color = "red2")+ ggrepel::geom_label_repel(aes(label=ifelse((p_val_adj < 0.05) & (abs(avg_log2FC) > 1),as.character(gene),'')),
+                  box.padding   = 0.35, 
+                  point.padding = 0.5,
+                  size = 2,
+                  segment.color = 'grey50',
+                  max.overlaps = 30) +
+  theme_classic()+
+    ggtitle(paste0(i,": NT-C v.s. T-C"))
+  ggsave(volcano_plot_file,plot = g, width = 6, height = 6)
+  
+  
+  de_results_tbl <- de_results_tbl %>% 
+			filter(p_val_adj < padj_thres) %>%
+			filter(abs(avg_log2FC) > log2FC_thres)
+			
+  write.table(de_results_tbl, output_file_flt,sep="\t",row.names=T)
+}
+```
+
+
+#### NT-KO v.s. NT-C
+
+```{r}
+screp$group <- gsub(" ","_",paste0(screp$orig.ident,"_",screp$annotation_final))
+conditions <- unique(screp$orig.ident)[order(unique(screp$orig.ident))][1:2] # Levels: NT_C NT_KO T_C T_KO
+clusters <- unique(screp$annotation_final)
+plts <- list()
+padj_thres = 10e-2
+log2FC_thres = 1
+Idents(screp) <- screp$group
+```
+
+```{r}
+for (i in clusters) {
+  output_file <- paste0("",paste0("convT_",conditions[1],'_vs_',conditions[2],'_', i, '.tsv'))
+  output_file_flt <- paste0("",paste0("convT_",conditions[1],'_vs_',conditions[2],'_', i, '_filtered.tsv'))
+  volcano_plot_file <- paste0(outdir,paste0("convT_",conditions[1],'_vs_',conditions[2],'_', i, '_volcano.pdf'))
+  de_results_tbl <- lapply(i, de_clusters) 
+  de_results_tbl <- de_results_tbl %>% bind_rows() %>%
+			arrange(desc(abs(avg_log2FC))) %>%
+			mutate(threshold = case_when(
+			(p_val_adj < padj_thres) & (abs(avg_log2FC) > log2FC_thres) ~ "Pass",
+			.default = "Fail"
+			))
+  write.table(de_results_tbl, output_file,sep="\t",row.names=T)
+  
+  g <- ggplot(de_results_tbl,aes(x=avg_log2FC, y = -log10(p_val_adj), label = gene))+
+  geom_point(aes(color = threshold))+
+  geom_vline(xintercept = c(1,-1),color = "red2")+geom_hline(yintercept = 1.3, color = "red2")+ ggrepel::geom_label_repel(aes(label=ifelse((p_val_adj < 0.05) & (abs(avg_log2FC) > 1),as.character(gene),'')),
+                  box.padding   = 0.35, 
+                  point.padding = 0.5,
+                  size = 2,
+                  segment.color = 'grey50',
+                  max.overlaps = 30) +
+  theme_classic()+
+    ggtitle(paste0(i,": NT-KO v.s. NT-C"))
+  ggsave(volcano_plot_file,plot = g, width = 6, height = 6)
+  
+  
+  de_results_tbl <- de_results_tbl %>% 
+			filter(p_val_adj < padj_thres) %>%
+			filter(abs(avg_log2FC) > log2FC_thres)
+			
+  write.table(de_results_tbl, output_file_flt,sep="\t",row.names=T)
+}
+```
+
+
+#### T-KO v.s. T-C
+
+```{r}
+screp$group <- gsub(" ","_",paste0(screp$orig.ident,"_",screp$annotation_final))
+conditions <- unique(screp$orig.ident)[order(unique(screp$orig.ident))][3:4] # Levels: NT_C NT_KO T_C T_KO
+clusters <- unique(screp$annotation_final)
+plts <- list()
+padj_thres = 10e-2
+log2FC_thres = 1
+Idents(screp) <- screp$group
+```
+
+```{r}
+for (i in clusters) {
+  output_file <- paste0("",paste0("convT_",conditions[1],'_vs_',conditions[2],'_', i, '.tsv'))
+  output_file_flt <- paste0("",paste0("convT_",conditions[1],'_vs_',conditions[2],'_', i, '_filtered.tsv'))
+  volcano_plot_file <- paste0(outdir,paste0("convT_",conditions[1],'_vs_',conditions[2],'_', i, '_volcano.pdf'))
+  de_results_tbl <- lapply(i, de_clusters) 
+  de_results_tbl <- de_results_tbl %>% bind_rows() %>%
+			arrange(desc(abs(avg_log2FC))) %>%
+			mutate(threshold = case_when(
+			(p_val_adj < padj_thres) & (abs(avg_log2FC) > log2FC_thres) ~ "Pass",
+			.default = "Fail"
+			))
+  write.table(de_results_tbl, output_file,sep="\t",row.names=T)
+  
+  g <- ggplot(de_results_tbl,aes(x=avg_log2FC, y = -log10(p_val_adj), label = gene))+
+  geom_point(aes(color = threshold))+
+  geom_vline(xintercept = c(1,-1),color = "red2")+geom_hline(yintercept = 1.3, color = "red2")+ ggrepel::geom_label_repel(aes(label=ifelse((p_val_adj < 0.05) & (abs(avg_log2FC) > 1),as.character(gene),'')),
+                  box.padding   = 0.35, 
+                  point.padding = 0.5,
+                  size = 2,
+                  segment.color = 'grey50',
+                  max.overlaps = 30) +
+  theme_classic()+
+    ggtitle(paste0(i,": T-KO v.s. T-C"))
+  ggsave(volcano_plot_file,plot = g, width = 6, height = 6)
+  
+  
+  de_results_tbl <- de_results_tbl %>% 
+			filter(p_val_adj < padj_thres) %>%
+			filter(abs(avg_log2FC) > log2FC_thres)
+			
+  write.table(de_results_tbl, output_file_flt,sep="\t",row.names=T)
+}
+```
+
+### VlnPlot for some important genes
+
+```{r}
+genes <- c("Ccr7","Lef1","Tcf7","Ccr2","Gzma","Gzmb","Gzmk","Prf1","Tigit","Tox","Pdcd1","Icos","Ifit2","Il2ra","Il6","Pdcd1lg2")
+```
+
+```{r}
+screp.aa$group <- gsub(" ","_",paste0(screp.aa$orig.ident,"_",screp.aa$celltype))
+```
+
+
+```{r}
+DotPlot(screp.aa,features = genes, group.by = "group")+RotatedAxis()
+```
+
+```{r}
+VlnPlot(screp.aa,features = "Gzmk",group.by = "celltype",split.by = "orig.ident",alpha = 0.2)
+```
+
+```{r}
+glist <- lapply(genes, function(x){
+  VlnPlot(screp.aa,features = x,group.by = "celltype",split.by = "orig.ident",alpha = 0.2)
+})
+g <- gridExtra::grid.arrange(grobs = glist, ncol = 3)
+ggsave(filename = paste0(outdir,"/Fig4_T_cell_VlnPlots_group_by_celltype.pdf"),plot = g,width = 20,height = 20)
+
+glist <- lapply(genes, function(x){
+  VlnPlot(screp.aa,features = x,group.by = "orig.ident",alpha = 0.2)
+})
+g <- gridExtra::grid.arrange(grobs = glist, ncol = 3)
+ggsave(filename = paste0(outdir,"/Fig4_T_cell_VlnPlots_group_by_genotype.pdf"),plot = g,width = 20,height = 20)
+```
+
+
+
+## GSEA for V3p3 subpopulations
+
+```{r}
+markers <- read.table("SR003099_DF_convT_V3p3_irf8d32tapoe_resolution_0.9_markers.tsv",sep = "\t",header = T)
+```
+
+```{r}
+# for fgsea
+library(msigdbr)
+library(fgsea)
+library(org.Mm.eg.db)
+library(Seurat) # youb know why
+library(tidyverse) # base package for data organization and plotting
+library(RColorBrewer) # for making palettes
+library(gridExtra) # for arranging multiple plots
+library(data.table) # well...
+library(dslice) # for loading gmt files
+```
+
+
+```{r prepare gene sets}
+H_df<- msigdbr(species = "Mus musculus", category = "H")
+Imm_df <- msigdbr(species = "Mus musculus", category = "C7",subcategory = "IMMUNESIGDB")
+Celltype_df <- msigdbr(species = "Mus musculus", category = "C8")
+C2_KEGG <- msigdbr(species = "Mus musculus", category = "C2",subcategory = "CP:KEGG")
+C2_React <- msigdbr(species = "Mus musculus", category = "C2",subcategory = "CP:REACTOME")
+
+
+fgsea_sets_Hallmark <- H_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_Imm <- Imm_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_KEGG <- C2_KEGG %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_REACT <- C2_React %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_Celltype <- Celltype_df %>% split(x = .$gene_symbol, f = .$gs_name)
+
+```
+
+```{r}
+fgsea_res <- function(cell_type_vector, DE_genes, choose_n = 100, choose_tops = F,gene_set = fgsea_sets_Hallmark,mode = "combined",outdir){
+  if(!dir.exists(outdir)) {dir.create(outdir)}
+  fgsea_res <- list()
+  #DE_selected <- DE_genes %>% group_by(cluster) %>% filter(p_val_adj < 0.05 & abs(avg_log2FC) > 1 & pct.1 > 0.1) %>% mutate(metric = sign(avg_log2FC)*(-log10(p_val_adj))) %>% filter(!is.infinite(metric))
+  DE_selected <- DE_genes %>% mutate(metric = sign(avg_log2FC)*(-log10(p_val_adj))) %>% filter(!is.infinite(metric))
+  if (mode == "simple"){
+    DE_selected <- DE_genes %>% mutate(metric = avg_log2FC) %>% filter(!is.infinite(metric))
+  }
+  for (i in cell_type_vector) {
+    DE <- DE_selected[DE_selected$cluster == i,] %>% arrange(desc(metric)) %>% dplyr::select(gene,metric)
+    if (choose_tops){
+      DE_top <- DE %>% group_by(cluster) %>% slice_max(order_by = metric, n = choose_n)
+      DE_tail <- DE %>% group_by(cluster) %>% slice_min(order_by = metric, n = choose_n)
+      DE <- rbind(DE_top,DE_tail)
+    }
+    DE <- DE %>% arrange(desc(metric)) %>% dplyr::select(gene,metric)
+    rankings <- DE$metric
+    names(rankings) <- DE$gene
+    #print(rankings)
+    plot(rankings)
+    title(main = i)
+    fgseaRes <- fgsea(gene_set, stats = rankings,nPermSimple = 10000)
+    fgseaResTidy <- fgseaRes %>%
+      as_tibble() %>% filter(padj < 0.05 ) %>%
+      arrange(desc(NES))
+  fgsea_res[[i]] <- fgseaResTidy
+  fwrite(fgseaResTidy, file=paste0(outdir,i,"_fgsea.tsv"), sep="\t", sep2=c("", " ", ""))
+  } # need to add name of gene sets to the file name
+   return(fgsea_res)
+}
+```
+
+### test immunogenic GS on c4, c10, c9
+
+```{r}
+convT_fgsea_imm <- fgsea_res(as.character(unique(markers$cluster)),markers,gene_set = fgsea_sets_Imm,mode = "simple",outdir = paste0(outdir,"Immunogenic/"))
+```
+
+```{r}
+imm_vector <- names(fgsea_sets_Imm)
+celltype_vector <- as.character(unique(markers$cluster))
+table_res_convT <- data.frame(pathway = imm_vector)
+for (i in celltype_vector){
+  table_tmp <- convT_fgsea_imm[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% imm_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_convT <- full_join(table_res_convT,table_celltype,by = "pathway")
+}
+
+table_res_convT[is.na(table_res_convT)] = 0
+table_res_convT <- table_res_convT[apply(table_res_convT[,2:(length(unique(markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_convT,file = paste0(outdir,"Immunogenic/","fgsea_convT_Immunogenic_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+
+
+## clonality analysis
+
+require re-do; performed in a different Rmd
+
+```{r}
+colnames(screp.aa@meta.data)
+```
+### Frequency plot
+
+```{r}
+meta %>% filter(CTaa != "NA") %>%  group_by(cloneSize,orig.ident,CTaa) %>% summarise(n = n()) %>% ungroup() %>% group_by(orig.ident) %>% mutate(Proportion = n*100/sum(n))
+```
+
+
+```{r}
+meta %>% filter(CTaa != "NA") %>% group_by(cloneSize,orig.ident,CTaa) %>% summarise() %>% ungroup() %>% group_by(cloneSize,orig.ident) %>% summarise(freq_clone_size = n())  %>% ungroup() %>% group_by(orig.ident) %>% mutate(Proportion = freq_clone_size*100/sum(freq_clone_size))
+```
+
+
+```{r}
+g <- ggplot(meta %>% filter(CTaa != "NA") %>%  group_by(cloneSize,orig.ident) %>% summarise(n = n()) %>% ungroup() %>% group_by(orig.ident) %>% mutate(Proportion = n*100/sum(n)))+
+  geom_bar(aes(x = orig.ident, y = Proportion, fill = factor(cloneSize, levels = c("Small (1e-04 < X <= 0.001)","Medium (0.001 < X <= 0.01)","Large (0.01 < X <= 0.1)") )),stat = "identity",position = "stack")+scale_fill_manual("Clonotype Size",values = c("Small (1e-04 < X <= 0.001)" = "#56106EFF", "Medium (0.001 < X <= 0.01)" = "#BB3754FF", "Large (0.01 < X <= 0.1)" = "#F98C0AFF"))+theme_classic()+xlab("Condition")
+g
+# ggsave(filename = paste0(outdir,"Fig4_relative_clone_abundance_aa_filtered_new.pdf"),plot = g, width = 10,height = 8)
+```
+Try creating scRep object
+
+```{r}
+library(scRepertoire)
+```
+
+
+```{r}
+filtered_combined <- lapply(c("NT_C","NT_KO","T_C","T_KO"), function(x){
+  screp.aa@meta.data %>% filter( (!is.na(CTaa))  & orig.ident == x) 
+}
+)
+names(filtered_combined) <- c("NT_C","NT_KO","T_C","T_KO")
+```
+
+```{r}
+relative_abundance <- as.data.frame(clonalHomeostasis(filtered_combined, 
+                  cloneCall = "aa",exportTable = T))
+relative_abundance = relative_abundance[,colSums(relative_abundance) > 0]
+relative_abundance$condition = rownames(relative_abundance)
+
+relative_abundance = reshape2::melt(relative_abundance, id = "condition",variable.name = "ClonalType", value.name = "Proportion")
+
+g <- ggplot(relative_abundance)+
+  geom_bar(aes(x = condition, y = Proportion, fill = ClonalType ),stat = "identity",position = "stack")+
+  #scale_fill_manual(values = c("Small (1e-04 < X <= 0.001)" = "#56106EFF", "Medium (0.001 < X <= 0.01)" = "#BB3754FF", "Large (0.01 < X <= 0.1)" = "#F98C0AFF"))+
+  theme_classic()
+g
+```
+
+```{r}
+meta %>% filter(CTaa != "NA") %>% group_by(cloneSize,orig.ident,CTaa,clonalProportion) %>% summarise() %>% ungroup() %>% group_by(cloneSize,orig.ident) %>% mutate(Proportion = sum(clonalProportion)) %>% ungroup() %>% group_by(orig.ident)
+```
+```{r}
+g <- ggplot(meta %>% filter(CTaa != "NA") %>% group_by(cloneSize,orig.ident,CTaa,clonalProportion) %>% summarise() %>% ungroup() %>% group_by(cloneSize,orig.ident) %>% mutate(Proportion = sum(clonalProportion)) %>% ungroup() %>% group_by(orig.ident))+
+  geom_bar(aes(x = orig.ident, y = Proportion, fill = factor(cloneSize, levels = c("Small (1e-04 < X <= 0.001)","Medium (0.001 < X <= 0.01)","Large (0.01 < X <= 0.1)") )),stat = "identity",position = "stack")+scale_fill_manual("Clonotype Size",values = c("Small (1e-04 < X <= 0.001)" = "#56106EFF", "Medium (0.001 < X <= 0.01)" = "#BB3754FF", "Large (0.01 < X <= 0.1)" = "#F98C0AFF"))+theme_classic()+xlab("Condition")
+g
+```
+
+
+
+
+```{r}
+g <- ggplot(meta, aes(x = umap_1, y = umap_2)) +
+  geom_point(aes(color = factor(as.character(cloneSize),levels = c("None ( < X <= 0)",
+                                                      "Rare (0 < X <= 1e-04)",
+                                                      "Small (1e-04 < X <= 0.001)",
+                                                      "Medium (0.001 < X <= 0.01)",
+                                                      "Large (0.01 < X <= 0.1)",
+                                                      "Hyperexpanded (0.1 < X <= 1)"))),alpha = 1,size = 0.5,fill = "white") +
+  geom_density_2d_filled(alpha = 0.2) +
+  geom_density_2d(colour = "black",alpha = 0.6)+
+  scale_fill_manual(values = c('white','#ffffd4','#fed976','#feb24c','#fd8d3c','#fc4e2a','#e31a1c','#b10026',"darkred"))+ #'#ffffd4'
+  scale_color_manual(values = c("None ( < X <= 0)" = "white",
+                                "Rare (0 < X <= 1e-04)" = "beige",
+                                "Small (1e-04 < X <= 0.001)" = "orange",
+                                "Medium (0.001 < X <= 0.01)" = "coral",
+                                "Large (0.01 < X <= 0.1)" = "red2",
+                                "Hyperexpanded (0.1 < X <= 1)" = "darkred"),na.value = "grey95")+
+  theme_classic()+
+  facet_wrap(~orig.ident,ncol = 2, scales = "free")+
+ guides(fill = guide_legend(title = "Level",ncol = 2,position = "bottom"),
+        color = guide_legend(ncol = 3,position = "bottom",title = "Clone Size",override.aes = list(alpha = 0,shape = "circle")))
+
+g
+ggsave(filename = paste0(outdir,"/Fig4_cloneType_plot.pdf"),width = 12,height = 10)
+```
+
+
+```{r}
+g <- ggplot(meta, aes(x = umap_1, y = umap_2)) +
+  geom_point(aes(color = factor(as.character(cloneSize),levels = c("None ( < X <= 0)",
+                                                      "Rare (0 < X <= 1e-04)",
+                                                      "Small (1e-04 < X <= 0.001)",
+                                                      "Medium (0.001 < X <= 0.01)",
+                                                      "Large (0.01 < X <= 0.1)",
+                                                      "Hyperexpanded (0.1 < X <= 1)"))),alpha = 1,size = 0.5,fill = "white") +
+  geom_density_2d(colour = "black",alpha = 0.6)+
+  scale_fill_manual(values = c('white','#ffffd4','#fed976','#feb24c','#fd8d3c','#fc4e2a','#e31a1c','#b10026',"darkred"))+ #'#ffffd4'
+  scale_color_manual(values = c("None ( < X <= 0)" = "white",
+                                "Rare (0 < X <= 1e-04)" = "beige",
+                                "Small (1e-04 < X <= 0.001)" = "orange",
+                                "Medium (0.001 < X <= 0.01)" = "coral",
+                                "Large (0.01 < X <= 0.1)" = "red2",
+                                "Hyperexpanded (0.1 < X <= 1)" = "darkred"),na.value = "grey95")+
+  theme_classic()+
+  facet_wrap(~orig.ident,ncol = 2, scales = "free")+
+ guides(fill = guide_legend(title = "Level",ncol = 2,position = "bottom"),
+        color = guide_legend(ncol = 3,position = "bottom",title = "Clone Size",override.aes = list(alpha = 0,shape = "circle")))
+g
+#ggsave(filename = paste0(outdir,"/Fig4_cloneType_plot_without_filling.pdf"),width = 12,height = 10)
+```
+
+### barplot of clone sizes
+
+```{r}
+freq_meta <- screp.aa@meta.data %>% filter(!is.na(cloneSize)) %>% group_by(orig.ident,cloneSize) %>% mutate(type_counts = n()) %>% ungroup() %>% group_by(orig.ident) %>% mutate(sample_size = n()) %>% ungroup() %>% mutate(proportion = type_counts/sample_size)
+```
+
+```{r}
+table(freq_meta$cloneSize)
+```
+
+```{r}
+freq_meta %>% group_by(orig.ident, CTaa) %>% summarise(cloneFreq = n()) %>% slice_max(order_by = cloneFreq, n = 20) %>% ungroup()
+```
+
+```{r}
+freq_meta %>% group_by(orig.ident, CTaa,clonalFrequency,clonalProportion,cloneSize) %>% summarise() %>% ungroup() %>% group_by(orig.ident) %>% slice_max(order_by = clonalFrequency, n = 20) %>% ungroup()%>% arrange(-clonalProportion)
+```
+
+```{r}
+top_clones <- freq_meta %>% group_by(orig.ident,celltype, CTaa,clonalFrequency,clonalProportion, cloneSize) %>% summarise() %>% ungroup() %>% group_by(orig.ident) %>% filter(cloneSize == "Large (0.01 < X <= 0.1)" | cloneSize == "Medium (0.001 < X <= 0.01)") %>% ungroup()%>% arrange(-clonalProportion)
+```
+
+```{r}
+top_clones %>% group_by(orig.ident) %>% slice_max(order_by = clonalProportion,n = 1)
+# CAVMSNYNVLYF_CALGNTEVFF is common among top clones and show up in multiple cell types.
+```
+
+
+```{r}
+table(screp.aa$highlight)
+```
+
+
+```{r}
+# re-label NKT clone
+# CAVMSNYNVLYF_CALGNTEVFF
+VlnPlot(screp.aa,group.by = "highlight",features = "Klrb1c") # sanity check
+```
+
+
+```{r}
+#troubleshoot top 1 CD4 clone
+# CAMREGSYTNKVVF_CASSPGQGYERLFF
+top_clones %>% group_by(celltype) %>% slice_max(order_by = clonalProportion,n = 1)
+```
+
+```{r}
+screp.aa@meta.data <- screp.aa@meta.data %>% mutate(
+  celltype = case_when(
+    highlight == "CAVMSNYNVLYF_CALGNTEVFF" & (celltype == "CD8T" | celltype == "CD4T") ~ "NKT",
+    .default = celltype
+  ),
+  CD4_top1_troubleshoot = case_match(
+    CTaa,
+    "CAMREGSYTNKVVF_CASSPGQGYERLFF" ~ "CAMREGSYTNKVVF_CASSPGQGYERLFF",
+    .default = "Other"
+  )
+)
+```
+
+```{r}
+VlnPlot(screp.aa,group.by = "CD4_top1_troubleshoot",features = "Cd4")
+VlnPlot(screp.aa,group.by = "CD4_top1_troubleshoot",features = "Cd8a")
+VlnPlot(screp.aa,group.by = "CD4_top1_troubleshoot",features = "Klrb1c")
+```
+```{r}
+top_clones[top_clones$CTaa == "CAMREGSYTNKVVF_CASSPGQGYERLFF",]
+```
+
+I think they are indeed CD4 T cells
+
+
+```{r}
+screp.aa@meta.data <- screp.aa@meta.data %>% mutate(
+  celltype = case_when(
+    highlight == "CAVMSNYNVLYF_CALGNTEVFF" & (celltype == "CD8T" | celltype == "CD4T") ~ "NKT",
+    CTaa == "CAMREGSYTNKVVF_CASSPGQGYERLFF" & celltype != "Proliferating T" ~ "CD4T",
+    .default = celltype
+  )
+)
+```
+
+
+
+re-calculate top_clones:
+
+
+```{r}
+freq_meta <- screp.aa@meta.data %>% filter(!is.na(cloneSize)) %>% group_by(orig.ident,cloneSize) %>% mutate(type_counts = n()) %>% ungroup() %>% group_by(orig.ident) %>% mutate(sample_size = n()) %>% ungroup() %>% mutate(proportion = type_counts/sample_size)
+
+top_clones <- freq_meta %>% group_by(orig.ident,celltype, CTaa,clonalFrequency,clonalProportion, cloneSize) %>% summarise() %>% ungroup() %>% group_by(orig.ident) %>% filter(cloneSize == "Large (0.01 < X <= 0.1)" | cloneSize == "Medium (0.001 < X <= 0.01)") %>% ungroup()%>% arrange(-clonalProportion)
+
+top_clones %>% group_by(celltype) %>% slice_max(order_by = clonalProportion,n = 1)
+```
+
+```{r}
+top_clones %>% group_by(orig.ident) %>% slice_max(order_by = clonalProportion,n = 5)
+```
+
+
+```{r}
+g <- ggplot(top_clones) + 
+  geom_bar(aes(x = reorder(CTaa, -clonalProportion), y = clonalProportion, fill = orig.ident),stat = "identity",position = "dodge")+
+  facet_grid(~celltype, scale = "free")+theme_classic()+
+  xlab("Clonotype by amino acid")+
+  theme(axis.text.x = element_text(angle = 90,size = 5))
+g
+ggsave(paste0(outdir,"Fig4_CD3r_chain_aa_Large_Medium_clones_updated.pdf"),plot = g, width = 20, height = 20)
+```
+Since in the new annotation, some new NKT cells may be located outside of the NKT-like cluster, I need to manually correct them here. There is also a need to troubleshoot the top 1 CD4 clone in T_KO.(CAMREGSYTNKVVF_CASSPGQGYERLFF)
+
+
+```{r}
+write.table(top_clones,
+            file = "screp_Large_Medium_clones_updated.tsv",sep = "\t",col.names = T,row.names = F)
+```
+
+```{r}
+g <- ggplot(freq_meta %>% group_by(orig.ident, CTaa,clonalFrequency,clonalProportion) %>% summarise() %>% ungroup() %>% group_by(orig.ident) %>% slice_max(order_by = clonalProportion, n = 5) %>% ungroup()%>% arrange(-clonalProportion))+
+  geom_bar(aes(x = orig.ident, y = clonalProportion, fill = CTaa),stat = "identity",position = "stack")+
+  theme(legend.text = element_text(size = 5),
+        legend.title = element_text(size = 8))+
+  scale_fill_manual(values = pal)+
+  xlab("Genotype")+
+  guides(fill = guide_legend(ncol = 4,position = "bottom"))+theme_classic()
+g
+ggsave(paste0(outdir,"Fig4_CD3r_chain_aa_top5.pdf"),plot = g, width = 15, height = 10)
+```
+
+```{r}
+save(screp.aa,file = paste0(RDSdir,"lymphoid_convT_V3p3_merged_scRep_aa.Robj"))
+```
+
+
+### Gini Index
+
+```{r}
+library(DescTools)
+```
+
+
+```{r}
+Gini_df  <- screp.aa@meta.data %>% filter((!is.na(cloneSize))) %>% group_by(orig.ident,celltype,CTaa,clonalFrequency) %>% summarise(cloneFreq = n()) %>% ungroup() %>% group_by(orig.ident,celltype) %>% mutate(Gini_index = Gini(clonalFrequency)) %>% ungroup()
+```
+
+
+
+```{r}
+g <- ggplot(Gini_df) +
+  geom_bar(aes(x = orig.ident, y = Gini_index, fill = orig.ident),stat = "identity",position = "dodge")+
+  facet_wrap(~celltype,scales = "free")+xlab("Condition")+theme_classic()+ylab("Gini Index")
+g
+ggsave(filename = paste0(outdir,"/Fig4_Gini_index_plot.pdf"),width = 10,height = 6)
+g <- ggplot(Gini_df) +
+  geom_bar(aes(x = orig.ident, y = Gini_index, fill = orig.ident),stat = "identity",position = "dodge")+xlab("Condition")+theme_classic()+ylab("Gini Index")
+g
+ggsave(filename = paste0(outdir,"/Fig4_Gini_index_plot_bulk.pdf"),width = 10,height = 6)
+```
+
+
+### Top T-C and T-KO clone on umap and in VlnPlot
+
+```{r}
+table(screp.aa$highlight)
+```
+
+```{r}
+g <- VlnPlot(screp.aa,features = "Klrb1c",group.by = "highlight")
+ggsave(paste0(outdir,"Fig4_Supp_Klrb1c_exp_in_Tau_top1_clone.pdf"),plot = g, width = 8, height = 6)
+```
+
+
+```{r}
+g <- ggplot(meta)+
+  geom_point(aes(x = umap_1, y = umap_2, color = highlight,alpha = factor(highlight, levels = c("NA","CAVMSNYNVLYF_CALGNTEVFF","CAMREGYGSSGNKLIF_CASSWDWGGLSAETLYF"))))+
+  scale_color_manual("clonotype", values = c("CAMREGYGSSGNKLIF_CASSWDWGGLSAETLYF" = "darkblue", "CAVMSNYNVLYF_CALGNTEVFF" = "red2"), na.value = "grey90")+
+  scale_alpha_manual("", values = c("CAMREGYGSSGNKLIF_CASSWDWGGLSAETLYF" = 1, "CAVMSNYNVLYF_CALGNTEVFF" = 1), na.value = 0.1)+theme_classic()
+g
+ggsave(paste0(outdir,"Fig4_Supp_Tau_top1_clone_on_umap.pdf"),plot = g, width = 10, height = 6)
+
+```
+
+### more visualization of top clones
+
+```{r}
+top_AA <- freq_meta %>% group_by(orig.ident, CTaa,clonalFrequency,clonalProportion) %>% summarise() %>% ungroup() %>% group_by(orig.ident) %>% slice_max(order_by = clonalProportion, n = 20,with_ties = F) %>% ungroup()%>% arrange(-clonalProportion)
+```
+
+```{r}
+table(top_AA$clonalFrequency)
+```
+
+```{r}
+meta <- meta %>% 
+  mutate(clone_type = case_when(
+    CTaa %in% top_AA$CTaa ~ "Top",
+    .default = "non-Top"
+  ))
+```
+
+
+```{r}
+g <- ggplot(meta)+
+  geom_point(aes(x= umap_1, y = umap_2, color = clone_type,size = clonalProportion))+
+  facet_wrap(~orig.ident)+scale_color_manual(values = c("grey50","red2"))+scale_radius(range = c(0,1.5))+theme_classic()
+g
+ggsave(paste0(outdir,"Fig4_top_clones_on_umap_by_geno.pdf"),plot = g, width = 10, height = 8)
+```
+
+```{r}
+top_prolif_AA <- freq_meta %>% group_by(orig.ident, CTaa,clonalProportion,celltype) %>% summarise() %>% ungroup() %>% group_by(orig.ident) %>% slice_max(order_by = clonalProportion, n = 20,with_ties = T) %>% ungroup()%>% arrange(clonalProportion) %>% filter(celltype == "Proliferating T")
+```
+
+```{r}
+top_prolif_AA$CTaa
+```
+
+
+```{r}
+meta <- meta %>% mutate(
+  prolif_clone = case_when(
+    !(CTaa %in% top_prolif_AA$CTaa) ~ "Other",
+    .default = CTaa
+  ),
+  prolif_highlight = case_when(
+    !(CTaa %in% top_prolif_AA$CTaa) ~ "Other",
+    .default = "Prolif"
+  )
+)
+```
+
+```{r}
+table(meta$prolif_clone)
+```
+
+```{r}
+g <- ggplot(meta)+
+  geom_point(aes(x= umap_1, y = umap_2, color = prolif_clone,size = factor(prolif_highlight,levels = c("Other","Prolif")),alpha = factor(prolif_highlight,levels = c("Other","Prolif"))))+scale_size_manual(values = c("Other" = 0.5,"Prolif" = 1))+
+  facet_wrap(~orig.ident)+scale_color_manual("Clonotype",values = c(pal[1:2],pal[4:7],pal[9:10],pal[13:16],pal[18:20],pal[22:25],"grey70"))+scale_alpha_manual(values = c("Other" = 0.1,"Prolif" = 1))+theme_classic() + guides(alpha = "none",size = "none",colour = guide_legend(override.aes = list(size=3)))
+g
+
+ggsave(paste0(outdir,"Fig4_prolif_clones_on_umap.pdf"),plot = g, width = 12, height = 8)
+```
+
+#### prolif T sankey plots
+
+```{r}
+library(ggsankey)
+```
+
+```{r}
+df <- meta %>% filter(prolif_clone != "Other") %>% select(prolif_clone, orig.ident, celltype) %>% make_long(prolif_clone,orig.ident,celltype)
+```
+
+```{r}
+g <- ggplot(df, aes(x = x
+                     , next_x = next_x
+                     , node = node
+                     , next_node = next_node
+                     , fill = factor(node)
+                     )
+             )+
+  geom_sankey(flow.alpha = 0.5
+                      , node.color = "black"
+                      ,show.legend = T)+
+  theme_classic()+
+  theme(legend.position = "right")+
+  theme(axis.title = element_blank()
+                  , axis.text.y = element_blank()
+                  , axis.ticks = element_blank()  
+                  , panel.grid = element_blank())+
+  scale_fill_manual(values = pal)
+g
+ggsave(paste0(outdir,"Fig4_prolif_clones_sankey_plot.pdf"),plot = g, width = 15, height = 8)
+```
+

@@ -1,0 +1,1672 @@
+---
+title: "T_cell_processing_DF_res06"
+output: html_document
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony)
+library(DoubletFinder)
+library(miQC)
+library(SoupX)
+library(data.table)
+library(SeuratWrappers)
+```
+```{r}
+indir = "./R_outs/"
+outdir = "./R_outs/"
+```
+
+
+## step 1: process subset for SCN object creation
+(we will add the corresponding TCR layer for step 2)
+
+```{r}
+load(paste0(outdir,"T_cells_DF_res06.Robj"))
+```
+
+```{r}
+#we don't need to renormalize, but some pacakge will invoke the normalization command :) 
+T_cells <- NormalizeData(T_cells,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+T_cells <- FindVariableFeatures(object = T_cells, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+VariableFeatures(T_cells) <-  VariableFeatures(T_cells)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(T_cells))]
+VariableFeaturePlot(T_cells)
+
+T_cells <- ScaleData(object = T_cells, features = VariableFeatures(object = T_cells), vars.to.regress = c("nCount_RNA", "percent.mt"))
+T_cells <- RunPCA(object = T_cells,
+                features =  VariableFeatures(object = T_cells),
+                dims = 1:50)
+gc()
+```
+
+```{r}
+ElbowPlot(T_cells,ndims = 50)
+```
+
+
+```{r}
+T_cells <- RunHarmony(object = T_cells, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+T_cells <- RunUMAP(T_cells,dims = 1:30,reduction = "harmony")
+T_cells <- RunTSNE(T_cells,dims = 1:30,reduction = "harmony")
+
+T_cells <- FindNeighbors(T_cells, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  T_cells <- FindClusters(object = T_cells, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+```{r}
+library(RColorBrewer)
+```
+
+
+```{r}
+mypalette <- c(brewer.pal(n = 8, name = "YlOrRd")[3:8],brewer.pal(n = 8, name = "YlGnBu")[5:8],brewer.pal(n = 8, name = "YlOrBr")[5:8],brewer.pal(n = 8, name = "YlGn")[4:8],brewer.pal(n = 8, name = "YlOrBr")[5:8],brewer.pal(n = 8, name = "Purples")[3:8],brewer.pal(n = 8, name = "Greys")[3:7],brewer.pal(n = 8, name = "PuRd")[3:8])
+```
+
+```{r}
+DimPlot(T_cells, reduction = "umap",split.by = "orig.ident",shuffle = T,ncol = 2)
+DimPlot(T_cells, reduction = "umap",group.by = "RNA_snn_res.0.1",label = T)
+DimPlot(T_cells, reduction = "umap",label=T)
+```
+
+```{r}
+save(T_cells,file=paste0(outdir,"T_cells_DF_res06.Robj"))
+```
+
+```{r}
+load(paste0(outdir,"T_cells_DF_res06.Robj"))
+```
+
+
+```{r}
+Idents(T_cells) <- T_cells$RNA_snn_res.1
+FeaturePlot(T_cells,features = "Cd3e",reduction = "umap",label = T)
+
+FeaturePlot(T_cells,features = "Ncr1",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Cd4",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Cd8a",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Adgre1",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Mki67",reduction = "umap",label = T)
+```
+```{r}
+DotPlot(T_cells,features = c("Cd3e","Ncr1","Tyrobp","Xcl1","Cd8a","Cd4","Ccr7","Sell","Ly6c1","Tox","Pdcd1","Il4","Il17a","Itgam","Itgax","Cd7","Gzmb","Cx3cr1","Cd40lg","Bcl3","Foxp3","Slamf6","Isg15","Cd69","Trgv2"))+RotatedAxis()
+FeaturePlot(T_cells,features = "Ccr7",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Foxp3",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Il4",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Tyrobp",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Isg15",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Cd40lg",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Gzmb",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Gzma",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Egr1",reduction = "umap",label = T)
+```
+
+remove 18 because it is not Cd3e high
+
+```{r}
+T_cells_V2 <- subset(T_cells, idents = c(1:17,19))
+```
+
+```{r}
+FeaturePlot(T_cells,features = "Ccr7",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Foxp3",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Il4",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Tyrobp",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Isg15",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Cd40lg",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Gzmb",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Gzma",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Egr1",reduction = "umap",label = T)
+```
+
+```{r}
+Idents(T_cells) <- T_cells$RNA_snn_res.1
+FeaturePlot(T_cells,features = "Cd4",reduction = "umap",label = T)
+FeaturePlot(T_cells,features = "Cd8a",reduction = "umap",label = T)
+DotPlot(T_cells,features = c("Cd8a","Cd4","Foxp3","Ncr1","Ccr2","Cx3cr1","Sell","Ccr7","Gzmb","Lyz2","Il2ra","Cd69","Tbx21","Ikzf2"))+RotatedAxis()
+
+```
+
+
+```{r}
+cluster_prop <- T_cells@meta.data %>% group_by(orig.ident,RNA_snn_res.1) %>%
+  summarise(n = n()) %>% mutate(proportion = 100*n/sum(n))
+
+p1 <- ggplot(cluster_prop,aes(x = orig.ident, y = proportion,fill = orig.ident))+
+  geom_bar(stat = "identity", position = 'dodge')+
+  facet_wrap(~RNA_snn_res.1,scales = "free")+guides(fill=guide_legend(title="Condition"))+ ylab("Percentage of all T cells")+
+  theme(
+  plot.title = element_blank(),
+  axis.title.x = element_blank())+RotatedAxis()
+
+#g <- gridExtra::grid.arrange(grobs = list(p1),nrow = 4)
+ggsave(filename = paste0(outdir,"Proportion_barplots_res1_T_DF.pdf"), plot = p1, units = "cm",height = 40,width = 20)
+```
+
+```{r}
+T_cells <- JoinLayers(T_cells)
+```
+
+
+### process V2
+
+```{r}
+T_cells_V2 <- FindVariableFeatures(object = T_cells_V2, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+VariableFeatures(T_cells_V2) <-  VariableFeatures(T_cells_V2)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(T_cells_V2))]
+VariableFeaturePlot(T_cells_V2)
+
+T_cells_V2 <- ScaleData(object = T_cells_V2, features = VariableFeatures(object = T_cells_V2), vars.to.regress = c("nCount_RNA", "percent.mt"))
+T_cells_V2 <- RunPCA(object = T_cells_V2,
+                features =  VariableFeatures(object = T_cells_V2),
+                dims = 1:50)
+gc()
+T_cells_V2 <- RunHarmony(object = T_cells_V2, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+T_cells_V2 <- RunUMAP(T_cells_V2,dims = 1:30,reduction = "harmony")
+T_cells_V2 <- RunTSNE(T_cells_V2,dims = 1:30,reduction = "harmony")
+
+T_cells_V2 <- FindNeighbors(T_cells_V2, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  T_cells_V2 <- FindClusters(object = T_cells_V2, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+```{r}
+Idents(T_cells_V2) <- T_cells_V2$RNA_snn_res.1
+FeaturePlot(T_cells_V2,features = "Cd3e",reduction = "umap",label = T)
+
+FeaturePlot(T_cells_V2,features = "Ncr1",reduction = "umap",label = T)
+FeaturePlot(T_cells_V2,features = "Cd4",reduction = "umap",label = T)
+FeaturePlot(T_cells_V2,features = "Cd8a",reduction = "umap",label = T)
+FeaturePlot(T_cells_V2,features = "Adgre1",reduction = "umap",label = T)
+FeaturePlot(T_cells_V2,features = "Mki67",reduction = "umap",label = T)
+```
+
+```{r}
+DotPlot(T_cells_V2,features = c("Cd3e","Ncr1","Tyrobp","Xcl1","Cd8a","Cd4","Ccr7","Sell","Ly6c1","Tox","Pdcd1","Il4","Il17a","Itgam","Itgax","Cd7","Gzmb","Cx3cr1","Cd40lg","Bcl3","Foxp3","Slamf6","Isg15","Cd69","Trgv2"))+RotatedAxis()
+```
+
+```{r}
+VlnPlot(T_cells_V2,features = c("Cd4","Cd8a"))
+```
+
+```{r}
+save(T_cells_V2,file=paste0(outdir,"T_cells_DF_res06_V2.Robj"))
+```
+
+
+
+## Step 2 add TCR-seq layer
+
+There were previous walk-though of adding TCR-seq data. I would want to do these again here, so that the analysis is performed over the selected T cell clusters.
+
+```{r}
+library(Seurat)
+library(dplyr)
+library(data.table)
+library(ggplot2)
+library(RColorBrewer)
+#library(immunarch)
+library(gridExtra)
+library(ggrepel)
+library(kableExtra)
+#tcR is no longer maintained and available. immunarch is used instead.
+```
+
+```{r}
+outdir <- "./TCR_outs/"
+dir.create(outdir)
+```
+
+```{r helper functions}
+#' Clean contig annotation file for merging with clonotype file
+#' 1) remove columns that are not useful
+#' 2) remove "-1" in barcode name
+#' 
+#' @param contig.ann - filtered_contig_annotations.csv
+
+#Things have changed. now they have "TRUE" for productive column
+process.sample <- function(contig.ann) {
+  ann <- fread(contig.ann) %>%
+    dplyr::filter(productive == "TRUE") %>%
+    dplyr::select(-contig_id, -raw_consensus_id, -full_length, -is_cell, -high_confidence, -productive) %>%
+    dplyr::rename(clonotype_id = "raw_clonotype_id") %>%
+    mutate(barcode = gsub("-1", "", barcode))
+  ann
+}
+
+#' Clean contig annotation file for merging with clonotype file
+#' 1) For each chain, parse gene names, if there are multiple matches, take the most probable (first)
+#' 2) remove redundunt fields
+#' 
+#' @param clonotype.file - clonotypes.csv 
+#' @param consensus.ann.file consensus_annotations.csv
+annotate.clonotypes <- function(clonotype.file, consensus.ann.file) {
+  ## how to add gene information to clonotypes
+  clonotypes <- fread(clonotype.file)
+  consensus <- fread(consensus.ann.file) %>%
+    select(-full_length, - productive, -cdr3,  -cdr3_nt,-reads, -umis, -length)
+  
+  consensus.a <- consensus[grepl("TRA", consensus$chain),] %>%
+    select(-chain, -consensus_id) %>%
+    dplyr::group_by(clonotype_id) %>%
+    mutate(TRAV = gsub(",$", "", paste0(unique(v_gene), collapse =",")),
+           TRAJ = gsub(",$", "", paste0(unique(j_gene), collapse =",")),
+           TRAC = gsub(",$", "", paste0(unique(c_gene), collapse =","))) %>%
+    select(-v_gene, -j_gene, -c_gene, -d_gene) %>%
+    distinct()
+  
+  consensus.b <- consensus[grepl("TRB", consensus$chain),] %>%
+    select(-chain, -consensus_id) %>%
+    dplyr::group_by(clonotype_id) %>%
+    mutate(TRBV = gsub(",$", "", paste0(unique(v_gene), collapse =",")),
+           TRBD = gsub(",$", "", paste0(unique(d_gene), collapse =",")),
+           TRBJ = gsub(",$", "", paste0(unique(j_gene), collapse =",")),
+           TRBC = gsub(",$", "", paste0(unique(c_gene), collapse =","))) %>%
+    select(-v_gene, -j_gene, -c_gene, -d_gene) %>%
+    distinct()
+    x <- merge(merge(clonotypes, consensus.a, all = T), consensus.b, all = T) %>%
+    select(-TRAC, -TRBC)
+  
+  data.frame(x)
+}
+```
+
+```{r}
+sample_dir <- list.files(path="./TCR_seq/VDJ",full.names = T)
+tcr_dir <- paste(sample_dir,sep = "/") #define the tcr seq directory
+```
+
+Assume seurat object is already loaded
+
+```{r}
+# my object is integrated with cell id prefixed by sample id
+# the cell ids are the barcodes
+# they can be extracted either from expData created as above or directly from colnames
+
+# you need to remove the sample id from the cell name
+# for some wicked reasons, I have different sep for the sample id and the one used for the cell names :(. 
+
+# It would make your life much more easier if you keep everything consistent and minimize the use of seperators
+# tcr.present <- gsub(paste(paste0(gsub("-","_",samples),"_"),collapse = "|"),"",expData@Dimnames[[2]])
+# replace "-" by "_". Then append "_". Collapse by "|" so that we can look for multiple patterns. Replace the list of patterns by space. 
+
+
+tcr.present <- colnames(T_cells_V2[["RNA"]])
+tcr.present <- gsub("-1", "", tcr.present)
+
+samples <-  c("NT_C","NT_KO","T_C","T_KO") # the automated way is not working well here. I'll use list files instead or manually enter the sample id
+# the sample id should match the prefix of the cell ids
+```
+
+```{r}
+tcr.present[1:10]
+```
+
+
+```{r}
+# unless the directories are organized in accordance to the demo code
+# changing the codes need to be adjusted for the actual run
+# the samples can be hard to grep because of overlapping names
+# instead of concatenating the sample names with the directory, I'll use the directory directly.
+n_sample = length(samples)
+for (i in 1:n_sample) {
+  dir <- tcr_dir[i]
+  item <- samples[i]
+  # Clean contig annotation file for merging with clonotype file
+  contigs.tcr <- process.sample(paste(dir, "/filtered_contig_annotations.csv", sep = "")) %>%
+    mutate(Sample = item,
+           barcode = paste(item, "_", gsub("-1", "", barcode), sep = ""))
+  #I removed the 
+  # add gene information to clonotypes
+  clons.tcr.annot <- annotate.clonotypes(paste(dir, "/clonotypes.csv", sep = ""), 
+                                         paste(dir, "/consensus_annotations.csv", sep = "")) 
+  
+  # Remove TCR that do not have confirmed GEX cells
+  contigs.tcr <- contigs.tcr[contigs.tcr$barcode %in% tcr.present,]
+  clons.tcr.annot <- clons.tcr.annot[clons.tcr.annot$clonotype_id %in% contigs.tcr$clonotype_id,]
+
+  # re-count frequency based on presence
+  freq.tcr  <- contigs.tcr %>%
+    select(clonotype_id, barcode) %>%
+    distinct() %>%
+    group_by(clonotype_id) %>%
+    tally() %>%
+    dplyr::rename(frequency = "n")
+  
+  clons.tcr.annot$frequency <- NULL
+  clons.tcr.annot <- merge(clons.tcr.annot, freq.tcr)
+  clons.tcr.annot <- clons.tcr.annot[,c("clonotype_id", "frequency", "TRAV", "TRAJ", "TRBV", "TRBD", "TRBJ", "cdr3s_aa", "cdr3s_nt")] %>%
+    arrange(desc(frequency)) 
+  #%>%
+  #mutate(freq_name = rep(paste0(item,"_freq"),nrow(clons.tcr.annot)))
+  
+  # Put corect name for clonotype_id column
+  clons.tcr.annot$clonotype_id <- gsub("clonotype", paste(item, "_", sep = ""), clons.tcr.annot$clonotype_id)
+  colnames(clons.tcr.annot)[colnames(clons.tcr.annot) == "frequency"] <- paste(item, "freq", sep = "_")
+  colnames(clons.tcr.annot)[colnames(clons.tcr.annot) == "clonotype_id"] <- paste(item, "id", sep = "_")
+  
+  contigs.tcr$clonotype_id <- gsub("clonotype", paste(item, "_", sep = ""), contigs.tcr$clonotype_id)
+  
+  # Add to common table
+  if (item == samples[1]) {
+    table.annot <- clons.tcr.annot
+    table.tcr <- contigs.tcr
+  } else {
+    table.annot <- merge(table.annot, clons.tcr.annot, all.x = T, all.y = T)
+    table.tcr <- rbind(table.tcr, contigs.tcr)
+  }
+  
+}
+```
+
+
+```{r}
+# if clonotype is present in one sample and absent in other, add 0 to frequency and "-" to clonotype id for this sample
+table.annot$N_C_freq[is.na(table.annot$NT_C_freq)] <- 0
+table.annot$NT_KO_freq[is.na(table.annot$NT_KO_freq)] <- 0
+table.annot$T_C_freq[is.na(table.annot$T_C_freq)] <- 0
+table.annot$T_KO_freq[is.na(table.annot$T_KO_freq)] <- 0
+
+table.annot[is.na(table.annot)] <- "-"
+table.tcr[is.na(table.tcr)] <- "-"
+
+
+# sort clonotypes by one column (looks prettier)
+# I chose the tau APOE + Irf8d32 KO
+
+table.annot <- table.annot[order(table.annot$T_KO_freq, decreasing = T),] %>%
+  select(-cdr3s_nt)
+
+
+
+# this two files have to be added to TCR explorer
+write.table(table.tcr, paste(outdir, "/clonotypes.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+write.table(table.annot, paste(outdir, "/clonotypes_summary.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+```
+
+### population assignment
+
+```{r}
+library(dplyr)
+library(data.table)
+library(tidyr)
+library(ggplot2)
+library(RColorBrewer)
+library(ggrepel)
+library(kableExtra)
+library(ggseqlogo)
+library(stringr)
+library(gridExtra)
+library(ggpubr)
+library(grid)
+```
+
+```{r}
+source("./reference_codes/functions_scTCR.R")
+```
+
+
+```{r}
+mypalette <- c(brewer.pal(n = 8, name = "YlOrRd")[3:8],brewer.pal(n = 8, name = "YlGnBu")[5:8],brewer.pal(n = 8, name = "YlOrBr")[5:8],brewer.pal(n = 8, name = "YlGn")[4:8],brewer.pal(n = 8, name = "YlOrBr")[5:8],brewer.pal(n = 8, name = "Purples")[3:8],brewer.pal(n = 8, name = "Greys")[3:7],brewer.pal(n = 8, name = "PuRd")[3:8])
+# A palette of 40 colors
+```
+
+```{r}
+T_cells_V2$DF.classifications_0.25_0.09_122 <- NULL
+T_cells_V2$DF.classifications_0.25_0.09_163 <- NULL
+T_cells_V2$DF.classifications_0.25_0.09_328 <- NULL
+T_cells_V2$DF.classifications_0.25_0.09_384 <- NULL
+
+```
+
+```{r}
+#load metadata
+meta <- T_cells_V2@meta.data
+```
+
+```{r}
+meta <- meta %>% mutate(barcode = gsub("-1","",rownames(meta)))
+```
+
+
+
+```{r}
+indir <- "./TCR_outs/"
+```
+
+```{r}
+clons.bycell <- fread(paste(indir, "/clonotypes.txt", sep = "")) 
+```
+
+```{r}
+rownames(LayerData(T_cells_V2, assay = "RNA", layer = "scale.data"))[1:5]
+```
+
+For population assignment, we want to use the transcript counts. If count > 0, then there is expression.
+
+```{r}
+markers <- c("Cd3e","Cd4", "Cd8a", "Cd8b1", "Foxp3", "Cd7")
+#unlist(lapply(markers,function(x){grep(x,rownames(LayerData(T_cells_V2, assay = "RNA", layer = "counts")),fixed = T)}))
+#rownames(GetAssayData(object = T_cells_V2, assay = "RNA", layer = "counts"))[unlist(lapply(markers,function(x){grep(x,rownames(GetAssayData(object = T_cells_V2, assay = "RNA", layer = "counts")),fixed = T)}))]
+```
+
+```{r}
+GetAssayData(object = T_cells_V2, assay = "RNA", layer = "counts")[markers,]
+```
+
+
+```{r}
+rownames(T_cells_V2@assays$RNA@features@.Data)[rownames(T_cells_V2@assays$RNA@features@.Data) %in% markers]
+```
+
+```{r}
+as.data.frame(t(as.matrix(as.data.frame(GetAssayData(object = T_cells_V2, assay = "RNA", layer = "counts"))[markers,])))[1:5,]
+# Some genes can't be found in scale.data so counts are used instead
+```
+
+
+```{r}
+expr <- as.data.frame(t(as.matrix(as.data.frame(GetAssayData(object = T_cells_V2, assay = "RNA", layer = "counts"))[markers,]))) %>%
+  tibble::rownames_to_column(var = "barcode") %>%
+  mutate(barcode =  gsub("-1","",barcode))
+  
+## add expression information to cell-clonotype table and meta
+# If loading from seurat object, make sure the name of the cluster column is correct
+clons.bycell <- merge(merge(clons.bycell, meta[, c("barcode", "RNA_snn_res.1")]), expr)
+meta <- merge(meta, expr)
+```
+
+
+
+```{r}
+res <- data.frame(stat_name = character(), number = numeric(), stringsAsFactors = F)
+res[nrow(res) + 1,] <- c("Total number of cells", nrow(meta))
+
+x <- clons.bycell %>%
+  group_by(clonotype_id, Cd8a, Cd8b1, Cd4, Foxp3, barcode, chain) %>%
+  tally(name = "n_chain") %>%
+  ungroup() %>%
+  spread(chain, n_chain, fill = 0)
+# Multi does not exist, so this line of code is removed.
+
+## Number of cells with TCR out of all GEX cells
+res[nrow(res) + 1,] <- c("Number of cells with TCR", nrow(x))
+
+## number of unique clonotypes
+length(unique(x$clonotype_id))
+res[nrow(res) + 1,] <- c("Number of unique clonotypes", length(unique(x$clonotype_id)))
+
+## theshold of expression for gene-based assignments
+thresh <- 0
+
+## find CD8+ cells
+## they should express CD8 (a or b1 for mouse) and not CD4
+cd8 <- x %>% filter((Cd8a > thresh | Cd8b1 > thresh) & Cd4 <= thresh )
+res[nrow(res) + 1,] <- c("Number of CD8", nrow(cd8))
+res[nrow(res) + 1,] <- c("Number of CD8 with 1 chain", nrow(cd8 %>% filter(TRA == 1 & TRB == 0 | TRA == 0 & TRB == 1)))
+res[nrow(res) + 1,] <- c("Number of CD8 with TCRa & TCRb", nrow(cd8 %>% filter(TRA == 1 & TRB == 1)))
+res[nrow(res) + 1,] <- c("Number of CD8 with > 2 chains", nrow(cd8 %>% filter(TRA > 1 | TRB > 1)))
+
+
+# find CD4+ cells
+cd4 <- x %>% filter(Cd8a <= thresh & Cd4 > thresh )
+res[nrow(res) + 1,] <- c("Number of CD4", nrow(cd4))
+res[nrow(res) + 1,] <- c("Number of CD4 with 1 chain", nrow(cd4 %>% filter(TRA == 1 & TRB == 0 | TRA == 0 & TRB == 1)))
+res[nrow(res) + 1,] <- c("Number of CD4 with TCRa & TCRb", nrow(cd4 %>% filter(TRA == 1 & TRB == 1)))
+res[nrow(res) + 1,] <- c("Number of CD4 with > 2 chains", nrow(cd4 %>% filter(TRA > 1 | TRB > 1)))
+
+res %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+```{r}
+clons.bycell$type <- ""
+clons.bycell$type[clons.bycell$clonotype_id %in% cd4$clonotype_id] <- 'cd4'
+clons.bycell$type[clons.bycell$clonotype_id %in% cd8$clonotype_id] <- 'cd8'
+```
+
+```{r}
+for (item in intersect(cd8$clonotype_id, cd4$clonotype_id)) {
+  ncells.cd4 <- nrow(cd4 %>% filter(clonotype_id == item))
+  ncells.cd8 <- nrow(cd8 %>% filter(clonotype_id == item))
+  print(paste(item, ncells.cd8, ncells.cd4))
+  
+  if (ncells.cd4 > ncells.cd8) {
+    clons.bycell$type[clons.bycell$clonotype_id == item] <- 'cd4'
+  } else {
+    clons.bycell$type[clons.bycell$clonotype_id == item] <- 'cd8'
+  }
+}
+```
+```{r message=F}
+FeaturePlot(T_cells_V2,reduction = "umap",features = "Cd4",label = T) +scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(T_cells_V2,reduction = "umap",features = "Cd8a",label = T) +scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(T_cells_V2,reduction = "umap",features = "Cd7",label = T) +scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(T_cells_V2,reduction = "umap",features = "Ncr1",label = T) +scale_colour_gradientn(colors = c("grey", "red", "purple"))
+```
+
+
+```{r,warning=F}
+DimPlot(T_cells_V2,reduction="umap",cells.highlight = paste0(clons.bycell$barcode,"-1"),shuffle = T,sizes.highlight = 0.2)+scale_color_manual(name = "Clonotype Identified", labels = c("No", "Yes"),values = c("grey", "coral"))
+```
+
+
+```{r}
+# Add clonotype avail as a metadata
+clono_avail <- as.factor(rownames(T_cells_V2@meta.data) %in% paste0(clons.bycell$barcode,"-1"))
+table(clono_avail)
+
+```
+
+```{r}
+T_cells_V2$clono_avail <- clono_avail
+```
+
+save files
+```{r}
+write.table(clons.bycell, paste(outdir, "/clons_bycell.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+save(T_cells_V2,file = paste0("./T_cells_DF_res06_V2.Robj"))
+```
+
+```{r}
+T_cells_V2p1 <- subset(T_cells_V2,subset = clono_avail == "TRUE")
+```
+
+```{r}
+save(T_cells_V2p1,file = paste0("./T_cells_DF_res06_V2_wClon.Robj"))
+```
+
+
+store summary files
+
+Since two columns for sorting the annotation df are somehow missing (freq_name and frequency), I'll create the clonotype summary file using an alternative way.
+
+```{r}
+clons.bycell$type[clons.bycell$type == ""] <- "other"
+```
+
+```{r}
+write.table(clons.bycell, paste(outdir, "/clons_bycell.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+```
+
+```{r}
+n_id_df <- clons.bycell %>% group_by(barcode,clonotype_id) %>%
+  summarise(n = n()) %>%
+  mutate(clonotype_num = sum(n))
+```
+
+```{r}
+length(unique(n_id_df$clonotype_id))
+```
+
+Jan 27 let's stop here...
+
+Jan 28 continue;
+Now the exp_data has been generated (but it is extracted from counts, so we may need to normalize and scale it); alternatively we can extract the assay from the seurat object, normalize and scale all genes.
+
+```{r}
+clons.bycell <- fread(paste(outdir, "/clons_bycell.txt", sep = ""))
+# this one has type annotated
+```
+
+### explorative analysis
+
+```{r}
+#code for loading Robj is located on top
+meta = T_cells@meta.data
+```
+
+```{r}
+meta$barcode = gsub("-1","",rownames(meta))
+```
+
+```{r}
+meta$barcode[1:5]
+```
+
+
+```{r}
+rownames(meta) <- meta$barcode
+
+## load by cell information for CD4 and CD8
+cd4.bycell <- clons.bycell %>%
+  filter(type == "cd4") %>%
+  mutate(RNA_snn_res.1 = as.factor(RNA_snn_res.1))
+cd4.bycell <- merge(cd4.bycell, meta[, c("barcode", "RNA_snn_res.1")])
+
+cd8.bycell <- clons.bycell %>%
+  filter(type == "cd8")  %>%
+  mutate(RNA_snn_res.1 = as.factor(RNA_snn_res.1))
+cd8.bycell <- merge(cd8.bycell, meta[, c("barcode","RNA_snn_res.1")])
+
+## combine them
+clons.bycell_typed <- rbind(cd4.bycell, cd8.bycell)
+
+```
+
+```{r}
+clons.annot <- fread(paste(outdir, "/clonotypes_summary.txt", sep = ""))
+```
+
+```{r}
+clons.annot$N_C_freq <- NULL #not sure why I got this column...
+```
+
+```{r}
+write.table(clons.annot, paste(outdir, "/clonotypes_summary.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+```
+
+
+```{r}
+clons.annot %>%
+tidyr::gather("freq_name", "frequency", c(8, 10, 12, 14)) %>% ## be mindful that numbers here depend on ho many samples you have
+  mutate(Sample = gsub("_freq", "", freq_name)) %>%
+  tidyr::gather("id_name", "id", 7:10)
+```
+
+We still need to generate the second summary file :)
+```{r}
+clons <- clons.annot %>%
+  tidyr::gather("freq_name", "frequency", c(8, 10, 12, 14)) %>% ## be mindful that numbers here depend on how many samples you have
+  mutate(Sample = gsub("_freq", "", freq_name)) %>%
+  tidyr::gather("id_name", "id", 7:10) %>%
+  select(-id_name, -freq_name) %>%
+  dplyr::filter(frequency != 0 & id != "-") %>%
+  distinct() %>%
+  mutate(id.fake = gsub("_[0-9]*$", "", id)) %>%
+  filter(id.fake == Sample)  %>%
+  select(-id.fake)
+
+
+
+```
+
+Although it is written as optional on the wiki, we do need to analyze the clon idenity to finish the analysis
+
+```{r}
+clons.identity <- clons.bycell %>%
+  select(clonotype_id, type) %>%
+  distinct() %>%
+  filter(type != "")
+```
+
+```{r}
+clons.identity <- clons.identity %>%
+  rename(id = "clonotype_id")
+```
+
+```{r}
+## merge with CD4/CD8 annotation
+clons <- merge(clons, clons.identity, all.x = T)
+
+## untyped clones will produce NA, replace it with ""
+clons$type[is.na(clons$type)] <- ""
+write.table(clons, paste(outdir, "/clonotype_table_typed.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+```
+
+```{r}
+## load clonotype information
+clons <- fread(paste(indir, "/clonotype_table_typed.txt", sep = ""))
+samples <-  c("NT_C","NT_KO","T_C","T_KO")
+clons$Sample <- factor(clons$Sample, levels = samples)
+```
+
+
+```{r}
+## prepare table for total stats
+stat.tcr <- clons %>%
+  group_by(Sample, type) %>%
+  mutate(n_cells_initial = sum(frequency),
+         n_clonotypes_initial = n()) %>%
+  select(Sample, type, n_cells_initial, n_clonotypes_initial, n_cells_initial) %>%
+  distinct() 
+
+## Count number of alpha and betas for each clone
+clons$n_alpha <- sapply(1:nrow(clons), function(i) str_count(clons$cdr3s_aa[i], "TRA:"))
+clons$n_beta <- sapply(1:nrow(clons), function(i) str_count(clons$cdr3s_aa[i], "TRB:"))
+
+## prepare table for alpha/beta stats
+chain.stat <- clons %>%
+  group_by(Sample, n_alpha, n_beta, type) %>%
+  summarize(count = sum(frequency)) %>%
+  ungroup() %>%
+  rowwise() %>%
+  mutate(chain_name = paste0(c(n_alpha, " alpha, ", n_beta, " beta" ), collapse = "")) %>%
+  group_by(Sample, type) %>%
+  mutate(total_count = sum(count),
+         percent = count / total_count * 100)
+         
+```
+
+
+
+```{r}
+table(chain.stat$chain_name)
+```
+
+```{r}
+## factorize alpha/beta pairs so it is easier to visualize
+chain.stat$chain_name <- factor(chain.stat$chain_name, levels = c("1 alpha, 1 beta", 
+                                                                  "2 alpha, 1 beta", 
+                                                                  "0 alpha, 1 beta", 
+                                                                  "0 alpha, 2 beta", 
+                                                                  "1 alpha, 0 beta", 
+                                                                  "2 alpha, 0 beta", 
+                                                                  "1 alpha, 2 beta", 
+                                                                  "1 alpha, 3 beta", 
+                                                                  "3 alpha, 1 beta", 
+                                                                  "2 alpha, 2 beta", 
+                                                                  "3 alpha, 2 beta", 
+                                                                  "2 alpha, 4 beta", 
+                                                                  "3 alpha, 3 beta"))
+
+## factorize cell types
+chain.stat$type <- factor(chain.stat$type, levels = c("cd8", "cd4", "other"))
+
+
+```
+
+```{r}
+## plot the data
+ggplot(chain.stat, aes(x = chain_name, y = percent, fill = type)) +
+  geom_bar(stat = "identity", position = position_dodge2(preserve = "single"), color = "black") +
+  theme_classic() +
+  facet_wrap(~Sample) +
+  theme(axis.text.x=element_text(size=8, angle=45,hjust=0.95)) + 
+  xlab("") +
+  ggtitle("Distribution of chain numbers across TCRs")
+```
+
+
+#### Find MAIT/NKT cells
+
+Looks like something is off...
+
+```{r}
+clons$unconventional <- "-"
+clons$unconventional[grepl("TRAV11", clons$TRAV) & grepl("TRAJ18", clons$TRAJ) & grepl("TRBV1|TRBV13|TRBV29", clons$TRBV)] <- "NKT"
+clons$unconventional[grepl("TRAV1-2", clons$TRAV) & grepl("TRAJ33", clons$TRAJ) & grepl("TRBV13|TRBV19", clons$TRBV)] <- "MAIT"
+table(clons$unconventional)
+```
+
+```{r}
+write.table(clons, paste(outdir, "clonotype_table_typed_with_unconventional.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+```
+
+
+```{r}
+nkt <- clons %>%
+  group_by(Sample) %>% 
+  mutate(total = sum(frequency)) %>%
+  ungroup() %>%
+  filter(unconventional == "NKT")
+
+## visualize number of NKT per sample
+nkt %>% 
+  group_by(Sample) %>% 
+  mutate(n = sum(frequency)) %>% 
+  select(n, Sample) %>%
+  distinct() %>%
+  ggplot(aes(x = Sample, y = n)) + 
+  geom_bar(stat = "identity") + 
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 10, angle = 45, hjust = 1)) +
+  ylab("Number of NKT") + xlab("")
+
+## visualize % of NKT per sample
+nkt %>% 
+  group_by(Sample) %>% 
+  mutate(n = sum(frequency) / total * 100) %>% 
+  select(n, Sample) %>%
+  distinct() %>%
+  ggplot(aes(x = Sample, y = n)) + 
+  geom_bar(stat = "identity") + 
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 10, angle = 45, hjust = 1)) +
+  ylab("NKT as % of total cells") + xlab("")
+
+## Filter them out for downstream analysis without them
+clons <- clons %>%
+  filter(!(id %in% nkt$id))
+```
+```{r}
+table(nkt$n_alpha)
+table(nkt$n_beta)
+```
+
+Need to perform QC on NKT
+
+```{r}
+nkt <- nkt %>%
+  filter(n_alpha == 1 & n_beta == 1)
+nkt %>% 
+  group_by(Sample) %>% 
+  mutate(n = sum(frequency)) %>% 
+  select(n, Sample) %>%
+  distinct() %>%
+  ggplot(aes(x = Sample, y = n)) + 
+  geom_bar(stat = "identity") + 
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 10, angle = 45, hjust = 1)) +
+  ylab("Number of NKT") + xlab("")
+
+## visualize % of NKT per sample
+nkt %>% 
+  group_by(Sample) %>% 
+  mutate(n = sum(frequency) / total * 100) %>% 
+  select(n, Sample) %>%
+  distinct() %>%
+  ggplot(aes(x = Sample, y = n)) + 
+  geom_bar(stat = "identity") + 
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 10, angle = 45, hjust = 1)) +
+  ylab("NKT as % of total cells") + xlab("")
+```
+
+
+```{r}
+nkt.cell.barcode <- paste0(clons.bycell$barcode[clons.bycell$clonotype_id %in% nkt$id],"-1")
+```
+
+```{r}
+DimPlot(T_cells_V2,reduction="umap",cells.highlight =nkt.cell.barcode,shuffle = T,sizes.highlight = 0.2,label = T)+scale_color_manual(name = "NKT cells", labels = c("No", "Yes"),values = c("grey", "coral"))
+FeaturePlot(T_cells_V2,features = "Ncr1",label = T)
+FeaturePlot(T_cells_V2,features = "Tyrobp",label=T)
+FeaturePlot(T_cells_V2,features = "Cd8a",label = T)
+FeaturePlot(T_cells_V2,features = "Cd4",label = T)
+```
+
+```{r}
+T_cells_V2$NKT_TCR <- rownames(T_cells_V2@meta.data) %in% nkt.cell.barcode
+table(T_cells_V2$NKT_TCR)
+```
+
+```{r}
+DimPlot(T_cells_V2,group.by = "NKT_TCR")
+```
+
+
+```{r}
+write.table(nkt, paste(outdir, "clonotype_nkt_filtered.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+save(T_cells_V2p1,file = paste0("./T_cells_DF_res06_V2_wClon.Robj"))
+```
+
+```{r}
+clons <- clons %>%
+  filter(n_alpha == 1 & n_beta == 1)
+
+## parse CDR3 chains
+clons$TRA <- sapply(1:nrow(clons), function(k) {
+  x <- strsplit(clons$cdr3s_aa[k], split = ';')[[1]]
+  x <- gsub("TRA:", "", grep("TRA", x, value = T))
+  x[[1]]})
+
+clons$TRB <- sapply(1:nrow(clons), function(k) {
+  x <- strsplit(clons$cdr3s_aa[k], split = ';')[[1]]
+  x <- gsub("TRB:", "", grep("TRB", x, value = T))})
+
+write.table(clons, paste(outdir, "clonotype_table_typed_filtered.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+```
+
+
+
+
+```{r}
+stat.tcr.2 <- clons %>%
+  group_by(Sample, type) %>%
+  mutate(n_cells_proper = sum(frequency),
+         n_clonotypes_proper = n()) %>%
+  select(Sample, type, n_cells_proper, n_clonotypes_proper) %>%
+  distinct() 
+
+stat.tcr <- merge(stat.tcr, stat.tcr.2)
+stat.tcr %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+
+write.table(stat.tcr, paste(outdir, "CD4_CD8_stat.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+```
+
+
+
+```{r}
+stat.tcr$type <- factor(stat.tcr$type, levels = c("cd8", "cd4", "other"))
+
+p <- ggplot(stat.tcr) +
+  geom_bar(aes(Sample, n_cells_initial, fill = type), color = "black", stat="identity", position="dodge", width = 0.9, alpha=0.5) +
+  geom_bar(aes(Sample, n_cells_proper, fill = type), color = "black", stat="identity", position="dodge", width = 0.9) +
+  theme_classic() + xlab("") + ylab("# of cells") +
+  theme(axis.text.x = element_text(size = 8, angle = 45, hjust = 1))
+
+p
+
+pdf(paste(outdir, "cells_filtered.pdf", sep = ""), width = 4, height = 3)
+  p
+dev.off()
+
+p <- ggplot(stat.tcr) +
+  geom_bar(aes(Sample, n_clonotypes_initial, fill = type), color = "black", stat="identity", position="dodge", width = 0.9, alpha=0.5) +
+  geom_bar(aes(Sample, n_clonotypes_proper, fill = type), color = "black", stat="identity", position="dodge", width = 0.9) +
+  theme_classic() + xlab("") + ylab("# of clonotypes") +
+  theme(axis.text.x = element_text(size = 8, angle = 45, hjust = 1))
+
+
+p
+
+pdf(paste(outdir, "clonotypes_filtered.pdf", sep = ""), width = 4, height = 3)
+  p
+dev.off()
+```
+#### analyze cd4 and cd8
+
+```{r}
+cd4.clons <- clons %>% group_by(Sample) %>% 
+  mutate(total = sum(frequency)) %>%
+  ungroup() %>%
+  filter(type == "cd4")%>% 
+  mutate(type = 'CD4')
+
+
+cd8.clons <- clons %>% group_by(Sample) %>% 
+  mutate(total = sum(frequency)) %>%
+  ungroup() %>%
+  filter(type == "cd8")%>% 
+  mutate(type = 'CD8')
+
+
+write.table(cd4.clons, paste(outdir, "clones_cd4_filtered.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+write.table(cd8.clons, paste(outdir, "clones_cd8_filtered.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+
+```
+
+make barplot and dimplot for CD8 T cells
+```{r}
+cd8.clons %>% 
+  group_by(Sample) %>% 
+  mutate(n = sum(frequency)) %>% 
+  select(n, Sample) %>%
+  distinct() %>%
+  ggplot(aes(x = Sample, y = n)) + 
+  geom_bar(stat = "identity") + 
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 10, angle = 45, hjust = 1)) +
+  ylab("Number of CD8 T Cells") + xlab("")
+
+## visualize % of NKT per sample
+cd8.clons %>% 
+  group_by(Sample) %>% 
+  mutate(n = sum(frequency) / total * 100) %>% 
+  select(n, Sample) %>%
+  distinct() %>%
+  ggplot(aes(x = Sample, y = n)) + 
+  geom_bar(stat = "identity") + 
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 10, angle = 45, hjust = 1)) +
+  ylab("CD8 T cells as % of total non-NKT T cells") + xlab("")
+```
+
+```{r}
+cd8t.cell.barcode <- paste0(clons.bycell$barcode[clons.bycell$clonotype_id %in% cd8.clons$id],"-1")
+```
+
+```{r}
+DimPlot(T_cells_V2,reduction="umap",cells.highlight = cd8t.cell.barcode,shuffle = T,sizes.highlight = 0.2,label = T)+scale_color_manual(name = "CD8 T cells", labels = c("No", "Yes"),values = c("grey", "coral"))
+FeaturePlot(T_cells_V2,features = "Ncr1",label = T)
+FeaturePlot(T_cells_V2,features = "Tyrobp",label=T)
+FeaturePlot(T_cells_V2,features = "Cd8a",label = T)
+FeaturePlot(T_cells_V2,features = "Cd4",label = T)
+```
+
+make barplot and dimplot for CD4 T cells
+
+
+
+```{r}
+cd4.clons %>% 
+  group_by(Sample) %>% 
+  mutate(n = sum(frequency)) %>% 
+  select(n, Sample) %>%
+  distinct() %>%
+  ggplot(aes(x = Sample, y = n)) + 
+  geom_bar(stat = "identity") + 
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 10, angle = 45, hjust = 1)) +
+  ylab("Number of CD4 T Cells") + xlab("")
+
+## visualize % of NKT per sample
+cd4.clons %>% 
+  group_by(Sample) %>% 
+  mutate(n = sum(frequency) / total * 100) %>% 
+  select(n, Sample) %>%
+  distinct() %>%
+  ggplot(aes(x = Sample, y = n)) + 
+  geom_bar(stat = "identity") + 
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 10, angle = 45, hjust = 1)) +
+  ylab("CD4 T cells as % of total non-NKT T cells") + xlab("")
+```
+
+
+
+```{r}
+cd4t.cell.barcode <- paste0(clons.bycell$barcode[clons.bycell$clonotype_id %in% cd4.clons$id],"-1")
+```
+
+```{r}
+DimPlot(T_cells_V2,reduction="umap",cells.highlight = cd4t.cell.barcode,shuffle = T,sizes.highlight = 0.2,label = T)+scale_color_manual(name = "CD4 T cells", labels = c("No", "Yes"),values = c("grey", "coral"))
+FeaturePlot(T_cells_V2,features = "Ncr1",label = T)
+FeaturePlot(T_cells_V2,features = "Tyrobp",label=T)
+FeaturePlot(T_cells_V2,features = "Cd8a",label = T)
+FeaturePlot(T_cells_V2,features = "Cd4",label = T)
+```
+
+
+
+```{r}
+T_cells_V2$CD8_TCR <- rownames(T_cells_V2@meta.data) %in% cd8t.cell.barcode
+table(T_cells_V2$CD8_TCR)
+T_cells_V2$CD4_TCR <- rownames(T_cells_V2@meta.data) %in% cd4t.cell.barcode
+table(T_cells_V2$CD4_TCR)
+```
+
+```{r}
+DimPlot(T_cells_V2,group.by = "CD8_TCR")
+DimPlot(T_cells_V2,group.by = "CD4_TCR")
+```
+
+```{r}
+save(T_cells_V2p1,file = paste0("./T_cells_DF_res06_V2_wClon.Robj"))
+```
+
+
+```{r}
+all.samples <- list()
+for (sample in samples) {
+  all.samples[[paste(sample, "_cd4", sep = "")]] <- cd4.clons %>%
+    filter(Sample == sample)
+  
+  all.samples[[paste(sample, "_cd8", sep = "")]] <- cd8.clons %>%
+    filter(Sample == sample)
+}
+```
+
+### Perform popular clone analysis
+
+```{r}
+library(DescTools)
+```
+
+
+```{r}
+clons.cd8.filtered <- read.table(paste0(outdir,"clones_cd8_filtered.txt"),sep = "\t",header = T)
+```
+
+```{r}
+clons.cd8.filtered <- clons.cd8.filtered[order(clons.cd8.filtered$frequency,decreasing = T),]
+```
+
+```{r}
+clons.cd8.top.by.sample <- clons.cd8.filtered %>% group_by(Sample) %>% slice_max(order_by = frequency,n = 20,with_ties = F)
+```
+
+```{r}
+ggplot(clons.cd8.top.by.sample, aes(x = reorder(id,-frequency), y= frequency,fill = Sample))+
+  geom_bar(stat = "identity", position = "dodge")+
+  facet_wrap(~Sample,scales = "free")+RotatedAxis()+xlab("clonotype id ordered by frequency")+ggtitle("Frequency of top 20 popular clonotype in CD8 T cells")
+```
+
+```{r}
+clons.cd8.filtered.withGini <- clons.cd8.filtered %>% select(Sample,frequency) %>% group_by(Sample) %>% mutate(Gini_index = Gini(frequency))
+```
+
+```{r}
+write.table(clons.cd8.filtered.withGini, paste(outdir, "clons.cd8.filtered.withGini.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+```
+
+
+```{r}
+ggplot(clons.cd8.filtered.withGini, aes(x = Sample, y= Gini_index,fill = Sample))+
+  geom_bar(stat = "identity", position = "dodge")+RotatedAxis()+xlab("Sample")+ ggtitle("Gini index of CD8 T cell clonotypes")
+```
+
+
+
+```{r}
+clons.cd4.filtered <- read.table(paste0(outdir,"clones_cd4_filtered.txt"),sep = "\t",header = T)
+```
+
+```{r}
+clons.cd4.filtered <- clons.cd4.filtered[order(clons.cd4.filtered$frequency,decreasing = T),]
+```
+
+```{r}
+clons.cd4.top.by.sample <- clons.cd4.filtered %>% group_by(Sample) %>% slice_max(order_by = frequency,n = 20,with_ties = F)
+```
+
+```{r}
+ggplot(clons.cd4.top.by.sample, aes(x = reorder(id,-frequency), y= frequency,fill = Sample))+
+  geom_bar(stat = "identity", position = "dodge")+
+  facet_wrap(~Sample,scales = "free")+RotatedAxis()+xlab("clonotype id ordered by frequency")+ggtitle("Frequency of top 20 popular clonotype in CD4 T cells")
+```
+
+```{r}
+clons.cd4.filtered.withGini <- clons.cd4.filtered %>% select(Sample,frequency) %>% group_by(Sample) %>% mutate(Gini_index = Gini(frequency))
+```
+
+```{r}
+write.table(clons.cd4.filtered.withGini, paste(outdir, "clons.cd4.filtered.withGini.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+```
+
+
+```{r}
+ggplot(clons.cd4.filtered.withGini, aes(x = Sample, y= Gini_index,fill = Sample))+
+  geom_bar(stat = "identity", position = "dodge")+RotatedAxis()+xlab("Sample")+ ggtitle("Gini index of CD4 T cell clonotypes")
+```
+```{r}
+write.table(clons.cd4.top.by.sample, paste(outdir, "clons_cd4_top_20_by_sample.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+write.table(clons.cd8.top.by.sample, paste(outdir, "clons_cd8_top_20_by_sample.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+```
+
+
+#### add most popular clonotype information to GEX dataset
+
+```{r}
+head(clons.cd4.top.by.sample)
+```
+
+```{r}
+clons.cd8.filtered %>% group_by(Sample) %>% slice_max(order_by = frequency,n = 1,with_ties = F)
+```
+The clonotype id is T_KO_1
+
+```{r}
+TKO_1_barcodes <- paste0(cd8.bycell$barcode[cd8.bycell$clonotype_id == "T_KO_1"],"-1")
+```
+
+```{r}
+DimPlot(T_cells_V2,reduction="umap",cells.highlight = TKO_1_barcodes,sizes.highlight = 0.2,label = T)+scale_color_manual(name = "CD8 T cells with most \n popular clonotype", labels = c("No", "Yes"),values = c("grey", "coral"))
+```
+
+```{r}
+clons.cd4.filtered %>% group_by(Sample) %>% slice_max(order_by = frequency,n = 1,with_ties = F)
+```
+
+
+```{r}
+TKO_2_barcodes <- paste0(cd4.bycell$barcode[cd4.bycell$clonotype_id == "T_KO_2"],"-1")
+```
+
+```{r}
+DimPlot(T_cells_V2,reduction="umap",cells.highlight = TKO_2_barcodes,sizes.highlight = 0.2,label = T)+scale_color_manual(name = "CD4 T cells with most \n popular clonotype", labels = c("No", "Yes"),values = c("grey", "coral"))
+```
+
+
+
+### perform TCR-QC and create CD8/CD4 subsets
+
+
+```{r}
+all.samples <- list()
+for (sample in samples) {
+  all.samples[[paste(sample, "_CD8", sep = "")]] <- cd8.clons %>%
+    filter(Sample == sample)
+}
+cd8.list <- list()
+
+for (sample in samples) {
+  clons.samples.cd8 <- cd8.clons %>%
+    filter(Sample == sample) %>%
+    rowwise() %>%
+    mutate(frequency = frequency + runif(1) / 10.) %>%
+    ungroup() %>%
+    arrange(desc(frequency)) %>%
+    top_n(10, frequency) %>%
+    mutate(frequency = round(frequency))
+  if (sample == samples[1]) {
+    cd8.tops <- clons.samples.cd8
+  } else {
+    cd8.tops <- rbind(cd8.tops, clons.samples.cd8)
+  }
+}
+
+```
+```{r}
+write.table(cd8.tops, paste(outdir, "CD8_top10_per_sample_Maria.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+```
+
+```{r}
+T_cells_V2$barcode <- gsub("-1","",rownames(T_cells_V2@meta.data))
+```
+
+
+```{r}
+clons.bycell <- clons.bycell %>% 
+  mutate(in_top40 = ifelse(clonotype_id %in% cd8.tops$id, 'top', 'non-top'))
+
+top.clons.bycell <- clons.bycell %>% filter(in_top40 == 'top')
+
+T_cells_V2@meta.data <- T_cells_V2@meta.data %>% 
+  mutate(top = ifelse(barcode %in% top.clons.bycell$barcode, 'top', 'non-top'))
+#rownames(whole.integrated@meta.data) <- colnames(whole.integrated)
+DimPlot(T_cells_V2, group.by = 'top')
+
+#grid.arrange(grobs = cd8.list, ncol = 4,
+#             top = textGrob("Top 10 CD8 clones",gp=gpar(fontsize=20)))
+
+#pdf(paste(outdir, "top10_clones_cd8.pdf", sep = ""), width=13, height=2)
+#grid.arrange(grobs = cd8.list, ncol = 6)
+#dev.off()
+
+```
+
+```{r}
+tt <- cd8.clons %>% 
+  rowwise() %>%
+  mutate(frequency = frequency +  runif(1)) %>%
+  ungroup() %>%
+  group_by(Sample) %>%
+  arrange(Sample, frequency) %>%
+  top_n(n = 40, wt = frequency)  %>%
+  mutate(frequency = round(frequency),
+         Condition = gsub("_2$", "", Sample))
+
+tt$Sample <- factor(tt$Sample, levels = samples)
+ggplot(tt, aes(x = reorder(id, -frequency), y = frequency, fill = Condition)) +
+  geom_bar(stat = "identity", width = 0.9) +
+  facet_wrap(~Sample, ncol = 6, scales= "free_x") +
+  theme_classic() +
+  scale_fill_brewer(palette = 'Set1')+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x = element_blank()) +
+  ggtitle("Top 40 clones for Cd8 cells") + xlab("") + ylab("")
+
+cd8.list <- list()
+for (item in samples) {
+  cd8.list[[item]] <- cd8.clons %>% filter(Sample == item) %>% arrange(-frequency)
+}
+```
+
+```{r}
+
+stat.cols <- getPalette.1(length(samples))
+names(stat.cols) <- samples
+
+cd8.clons.sharing <- cd8.clons %>%
+  select(Sample, cdr3s_aa) %>%
+  distinct() %>%
+  group_by(cdr3s_aa) %>%
+  summarise(shared = n())
+cd8.clons <- cd8.clons %>%
+  group_by(Sample) %>%
+  mutate(total = sum(frequency))
+
+cd8.shared <- merge(cd8.clons, cd8.clons.sharing) %>%
+  group_by(Sample, shared) %>%
+  mutate(comb_frequncy = sum(frequency),
+         occurance = n(),
+         type = "cd8",
+         percent = comb_frequncy / total * 100.) %>%
+  select(Sample, shared, comb_frequncy, total, occurance, type, percent) %>%
+  distinct()
+
+cd8.shared$Sample <- factor(cd8.shared$Sample, levels = samples)
+cd8.shared$shared <- factor(cd8.shared$shared, levels = c(3, 2, 1))
+cd8.shared <- cd8.shared %>% mutate(genotype = gsub('_.*', '', Sample))
+```
+
+```{r}
+p <- ggplot(cd8.shared, aes(x = shared, y = percent, fill = Sample)) +
+  geom_bar(stat = "identity", position = position_dodge(preserve = "single"), color = "black", width = 0.7) +
+  theme_classic() +
+  scale_fill_manual(values = stat.cols) + 
+  facet_grid(Sample ~ type) + xlab("# of samples sharing clones") +
+  ylab("% of cells bearing this clones") +
+  theme(strip.text = element_text(size = 6))
+
+p
+
+pdf(paste(outdir, "overlap_clones_number.pdf", sep = ""), width = 6, height = 7)
+p
+dev.off()
+
+```
+Becuase cdr3s_nt is missing from my version and cd3rs_aa would be good. I'll adapt the code a little bit.
+
+
+```{r}
+cd8.tcrdist <- cd8.clons %>%
+  mutate(subject = gsub('_[0-9]*$', '', Sample)) %>%
+  rename(a_aaseq = 'cdr3s_aa') %>%
+  mutate(b_aaseq = a_aaseq) %>%
+  mutate(a_aaseq = gsub('.*TRA:', '', a_aaseq)) %>%
+  mutate(b_aaseq = gsub('TRB:', '', b_aaseq)) %>%
+  mutate(b_aaseq = gsub(';TRA.*', '', b_aaseq)) %>%
+  mutate(epitope = 'Unk') %>% 
+  ungroup() %>% 
+  select(-c(TRAV, TRAJ, TRBV, TRBD, TRBJ,
+            frequency, type, n_alpha, n_beta,
+            unconventional, TRA, TRB, Sample, total)) %>% 
+  select(id, epitope, subject, a_aaseq, b_aaseq)
+write.table(cd8.tcrdist, paste(outdir, "cd8_tcrdist.tsv", sep = ""), sep = "\t", quote = F, row.names = F)
+
+```
+
+```{r}
+cd8.tcrdist3 <- cd8.clons %>% 
+  mutate(clone_id = gsub('.*_', '', id)) %>% 
+  dplyr::rename(subject = 'Sample') %>% 
+  dplyr::rename(v_a_gene = 'TRAV') %>% 
+  dplyr::rename(j_a_gene = 'TRAJ') %>% 
+  dplyr::rename(v_b_gene = 'TRBV') %>% 
+  dplyr::rename(j_b_gene = 'TRBJ') %>% 
+  as.data.frame()
+
+## for ipy viz
+
+cd8.tcrdist3 <- cd8.tcrdist3 %>% 
+  ungroup() %>% 
+  mutate(cdr3_a_aa = gsub('TRA:', '', stringr::str_extract(cdr3s_aa, 'TRA:.*'))) %>% 
+  mutate(cdr3_b_aa = gsub('TRB:|;', '', stringr::str_extract(cdr3s_aa, 'TRB:.*;'))) %>% 
+  mutate(epitope = 'Unk') %>% 
+  mutate(j_a_gene = gsub(',', ';', j_a_gene)) %>% 
+  mutate(v_b_gene = gsub(',', ';', v_b_gene)) %>% 
+  mutate(v_a_gene = gsub(',', ';', v_a_gene)) %>% 
+  mutate(j_b_gene = gsub(',', ';', j_b_gene)) %>% 
+  mutate(cdr3_a_aa = gsub(',', ';', cdr3_a_aa)) %>% 
+  mutate(cdr3_b_aa = gsub(',', ';', cdr3_b_aa)) %>% 
+  dplyr::rename(count = 'frequency') %>% 
+  mutate(j_a_gene = gsub('-', '/', j_a_gene)) %>% 
+  mutate(j_b_gene = gsub('-', '/', j_b_gene)) %>% 
+  mutate(v_b_gene = gsub('-', '/', v_b_gene)) %>% 
+  mutate(v_a_gene = gsub('-', '/', v_a_gene)) %>% 
+  dplyr::select(-c(id, type, unconventional, n_alpha, n_beta, TRA, TRB, TRBD, total, cdr3s_aa)) %>% 
+  mutate(genotype = gsub('_.*', '', subject))
+write.table(cd8.tcrdist3, paste(outdir, "cd8_tcr_ipy.tsv", sep = ""), sep = "\t", quote = F, row.names = F)
+```
+
+
+```{r}
+cd8.tcrdist3 <- cd8.clons %>% 
+  mutate(clone_id = gsub('.*_', '', id)) %>% 
+  dplyr::rename(subject = 'Sample') %>% 
+  dplyr::rename(v_a_gene = 'TRAV') %>% 
+  dplyr::rename(j_a_gene = 'TRAJ') %>% 
+  dplyr::rename(v_b_gene = 'TRBV') %>% 
+  dplyr::rename(j_b_gene = 'TRBJ') %>% 
+  as.data.frame()
+
+cd8.tcrdist3 <- cd8.tcrdist3 %>% 
+  ungroup() %>% 
+  mutate(cdr3_a_aa = gsub('TRA:', '', stringr::str_extract(cdr3s_aa, 'TRA:.*'))) %>% 
+  mutate(cdr3_b_aa = gsub('TRB:|;', '', stringr::str_extract(cdr3s_aa, 'TRB:.*;'))) %>% 
+  mutate(epitope = 'Unk') %>% 
+  mutate(j_a_gene = gsub(',', ';', j_a_gene)) %>% 
+  mutate(v_b_gene = gsub(',', ';', v_b_gene)) %>% 
+  mutate(v_a_gene = gsub(',', ';', v_a_gene)) %>% 
+  mutate(j_b_gene = gsub(',', ';', j_b_gene)) %>% 
+  mutate(cdr3_a_aa = gsub(',', ';', cdr3_a_aa)) %>% 
+  mutate(cdr3_b_aa = gsub(',', ';', cdr3_b_aa)) %>% 
+  rename(count = 'frequency') %>% 
+  mutate(j_a_gene = sprintf('%s*01', j_a_gene)) %>% 
+  mutate(j_b_gene = sprintf('%s*01', j_b_gene)) %>% 
+  mutate(v_b_gene = sprintf('%s*01', v_b_gene)) %>% 
+  mutate(v_a_gene = sprintf('%s*01', v_a_gene)) %>% 
+  mutate(j_a_gene = gsub('-', '/', j_a_gene)) %>% 
+  mutate(j_b_gene = gsub('-', '/', j_b_gene)) %>% 
+  mutate(v_b_gene = gsub('-', '/', v_b_gene)) %>% 
+  mutate(v_a_gene = gsub('-', '/', v_a_gene)) %>% 
+  select(-c(id, type, unconventional, n_alpha, n_beta, TRA, TRB, TRBD, total, cdr3s_aa)) %>% 
+  mutate(genotype = gsub('_.*', '', subject))
+write.table(cd8.tcrdist3, paste(outdir, "cd8_tcrdist3.tsv", sep = ""), sep = "\t", quote = F, row.names = F)
+
+```
+
+```{r}
+df <- fread('./TCR_outs/clons_bycell.txt')
+data <- df %>%
+  mutate(v_gene = sprintf('TCR_%s', v_gene),
+         j_gene = sprintf('TCR_%s', j_gene)) %>%
+  dplyr::select(c(barcode, v_gene, j_gene, umis))
+data <- pivot_longer(data, cols=2:3, names_to = "gene", values_to = "TCR_gene") %>%
+  select(-gene)
+#T_cells_V2$barcode <- paste0(T_cells_V2$barcode) 
+rownames(T_cells_V2@meta.data) <- T_cells_V2$barcode
+meta <- T_cells_V2@meta.data %>%
+  tibble::rownames_to_column('orig_barcode')
+data <- data %>%
+  mutate(orig_barcode = barcode) %>%
+  select(-barcode)
+tcr_umis <- data %>%
+  pivot_wider(names_from = TCR_gene, values_from = umis) %>%
+  unnest(cols = c(TCR_TRAV1, TCR_TRAJ33, `TCR_TRBV12-2+TRBV13-2`, `TCR_TRBJ2-3`, `TCR_TRBV13-1`, TCR_TRBV1, `TCR_TRBJ1-2`,
+  `TCR_TRAV12D-2`, TCR_TRAJ21, TCR_TRBV10, `TCR_TRBJ2-4`, `TCR_TRAV3D-3`, TCR_TRAJ17, `TCR_TRBV13-3`, `TCR_TRBJ1-3`,
+  `TCR_TRAV7D-2`, TCR_TRAJ4, TCR_TRAV11, TCR_TRAJ18, `TCR_TRBJ2-1`, `TCR_TRBJ2-5`, `TCR_TRAV12-1`, TCR_TRAJ11, `TCR_TRBV12-1`,
+  TCR_TRBV5, `TCR_TRBJ1-5`, TCR_TRAV16, TCR_TRAJ34, TCR_TRBV19, TCR_TRAJ26, `TCR_TRBV12-2`, TCR_TRBV3, `TCR_TRBJ1-1`,
+  `TCR_TRAV21-DV12`, TCR_TRAJ44, TCR_TRAJ40, TCR_TRBV14, TCR_TRBV17, `TCR_TRBJ2-2`, `TCR_TRAV14-1`, `TCR_TRAV8N-2`, `TCR_TRAV5-4`,
+  TCR_TRAJ53, TCR_TRAV10N, TCR_TRAJ22, TCR_TRAJ7, TCR_TRBV23, `TCR_TRAV6N-6`, TCR_TRBV16, `TCR_TRAV14N-3`, TCR_TRAJ16,
+  `TCR_TRAV4D-4`, `TCR_TRAV13D-1`, TCR_TRAJ42, `TCR_TRAV4-4-DV10`, TCR_TRAJ39, TCR_TRBV2, `TCR_TRBJ2-7`, TCR_TRAV10, TCR_TRAJ49,
+  `TCR_TRAV6-1`, TCR_TRAJ9, TCR_TRBV26, TCR_TRAV2, TCR_TRAJ23, `TCR_TRAV9-4`, TCR_TRAJ37, `TCR_TRAV13-1`, TCR_TRAJ27, TCR_TRBV29,
+  TCR_TRAV17, TCR_TRAJ52, TCR_TRAV16N, TCR_TRAJ15, `TCR_TRAV9D-3`, TCR_TRAJ35, `TCR_TRAV6-5`, TCR_TRAJ47, TCR_TRAV10D, TCR_TRAJ45,
+  `TCR_TRAV6-7-DV9`, `TCR_TRAV3-3`, `TCR_TRAV12-2`, `TCR_TRBJ1-4`, `TCR_TRAV6D-4`, `TCR_TRAV6-4`, `TCR_TRAV6D-5`, `TCR_TRBJ1-6`,
+  `TCR_TRAV13-2`, TCR_TRBV20, `TCR_TRAV9-2`, `TCR_TRAV6N-7`, TCR_TRBV15, `TCR_TRAV7N-6`, TCR_TRAJ12, `TCR_TRAV9N-4`, TCR_TRAJ38,
+  `TCR_TRAV6-3`, TCR_TRAJ31, TCR_TRAJ30, TCR_TRAJ32, TCR_TRBV31, TCR_TRAJ13, `TCR_TRAV4-3`, `TCR_TRAV14-2`, `TCR_TRAV7D-5`,
+  `TCR_TRAV16D-DV11`, TCR_TRAJ58, `TCR_TRAV14-3`, TCR_TRAJ48, TCR_TRAJ50, `TCR_TRAV6-6`, `TCR_TRAV9-1`, `TCR_TRAV7-4`, TCR_TRAJ5,
+  `TCR_TRAV5D-4`, `TCR_TRAV7-1`, TCR_TRAJ56, `TCR_TRAV12-3`, `TCR_TRAV12D-3`, `TCR_TRAV7-3`, TCR_TRAJ2, `TCR_TRBV13-2`,
+  `TCR_TRAV13D-2`, TCR_TRAJ57, `TCR_TRAV14D-1`, `TCR_TRAV7-6`, TCR_TRAJ43, `TCR_TRAV12D-1`, `TCR_TRAV3-4`, `TCR_TRAV8D-2`,
+  TCR_TRAV19, `TCR_TRAV13-4-DV7`, TCR_TRAJ28, `TCR_TRAV13N-1`, `TCR_TRAV8-1`, `TCR_TRAV14D-2`, `TCR_TRAV13D-4`, `TCR_TRAV7-5`,
+  TCR_TRAJ6, TCR_TRAJ24, `TCR_TRAV7D-3`, TCR_TRBV30, `TCR_TRAV15-1-DV6-1`, `TCR_TRAV9D-1`, `TCR_TRAV3-1`, `TCR_TRAV7D-4`,
+  `TCR_TRAV5-1`, `TCR_TRAV14D-3-DV8`, `TCR_TRAV15D-1-DV6D-1`, `TCR_TRAV9D-2`, `TCR_TRAV13N-3`, `TCR_TRAV13N-4`, `TCR_TRAV6N-5`,
+  `TCR_TRAV4D-3`, `TCR_TRAV6-2`, `TCR_TRAV8D-1`, `TCR_TRAV6D-3`, `TCR_TRAV4-2`, `TCR_TRAV15D-2-DV6D-2`, `TCR_TRAV13D-3`,
+  `TCR_TRAV7N-4`, `TCR_TRAV15-2-DV6-2`, `TCR_TRAV9D-4`, TCR_TRAV18, `TCR_TRAV6D-7`))
+tcr_test_umis <- tcr_umis %>%
+  filter(duplicated(orig_barcode)) %>%
+  tibble::column_to_rownames('orig_barcode')
+
+```
+
+```{r}
+colnames(T_cells_V2)
+```
+
+```{r}
+rownames(tcr_test_umis) <- paste0(rownames(tcr_test_umis),"-1")
+```
+
+```{r}
+
+```
+
+
+```{r}
+for (bc in rownames(tcr_test_umis)) {
+  bc_info <- data %>% filter(orig_barcode == bc)
+  for (tcr in bc_info$TCR_gene) {
+    tcr_test_umis[bc, tcr] <- sum((bc_info %>% filter(TCR_gene == tcr))$umis)
+  }
+}
+tcr_umis <- tcr_umis %>% filter(!orig_barcode %in% rownames(tcr_test_umis)) %>%
+  tibble::column_to_rownames('orig_barcode')
+tcr_umis_test <- rbind(tcr_umis, tcr_test_umis) %>%
+  replace(is.na(.), 0)
+
+```
+
+```{r}
+tcr_umis_test <- log2(tcr_umis_test + 1)
+tcr_umis_test <- tcr_umis_test[colnames(T_cells_V2),]
+```
+
+```{r}
+sum(colnames(T_cells_V2) %in% rownames(tcr_umis_test))
+```
+
+```{r}
+colnames(T_cells_V2)[1:10]
+tcr_umis_test["NT_C_AAACCTGGTGACGCCT",]
+"NT_C_AAACCTGGTGACGCCT" %in% rownames(tcr_umis_test)
+```
+
+```{r}
+
+```
+
+#### Top 10 clone plots
+```{r need to create my own plot.clonotype function}
+cd4.list <- list()
+cd8.list <- list()
+
+for (sample in samples) {
+  clons.samples.cd4 <- cd4.clons %>%
+    filter(Sample == sample) %>%
+    rowwise() %>%
+    mutate(frequency = frequency + runif(1) / 10.) %>%
+    ungroup() %>%
+    arrange(desc(frequency)) %>%
+    top_n(10, frequency) %>%
+    mutate(frequency = round(frequency))
+  cd4.list[[sample]] <- DimPlot(T_cells_V2,reduction="umap",cells.highlight = paste0(cd4.bycell$barcode[cd4.bycell$clonotype_id == sample],"-1"),sizes.highlight = 0.2,label = T)+scale_color_manual(values = c("grey", "coral"))
+    #plot.clonotypes(cd4.bycell, meta, cln = clons.samples.cd4$id, dot.size.choice = 1) + 
+    ggtitle(sample) + 
+    theme_void() + 
+    theme(strip.background = element_blank(),
+          strip.text.x = element_text(size = 10, face = "bold"),
+          plot.title = element_text(size = 10))
+  
+  clons.samples.cd8 <- cd8.clons %>%
+   filter(Sample == sample) %>%
+    rowwise() %>%
+    mutate(frequency = frequency + runif(1) / 10.) %>%
+    ungroup() %>%
+    arrange(desc(frequency)) %>%
+    top_n(10, frequency) %>%
+    mutate(frequency = round(frequency))
+  cd8.list[[sample]] <- plot.clonotypes(cd8.bycell, meta, cln = clons.samples.cd8$id, dot.size.choice = 1) + 
+    ggtitle(sample) + 
+    theme_void() + 
+    theme(strip.background = element_blank(),
+          strip.text.x = element_text(size = 10, face = "bold"),
+          plot.title = element_text(size = 10))
+  
+  if (sample == samples[1]) {
+    cd4.tops <- clons.samples.cd4
+    cd8.tops <- clons.samples.cd8
+  } else {
+    cd4.tops <- rbind(cd4.tops, clons.samples.cd4)
+    cd8.tops <- rbind(cd8.tops, clons.samples.cd8)
+  }
+}
+
+```
+
+```{r}
+grid.arrange(grobs = cd4.list, ncol = 6,
+     top = textGrob("Top 10 CD4 clones",gp=gpar(fontsize=20)))
+
+pdf(paste(outdir, "top10_clones_cd4.pdf", sep = ""), width=13, height=2)
+grid.arrange(grobs = cd4.list, ncol = 6)
+dev.off()
+```
+
+
+```{r}
+grid.arrange(grobs = cd8.list, ncol = 6,
+     top = textGrob("Top 10 CD8 clones",gp=gpar(fontsize=20)))
+
+pdf(paste(outdir, "top10_clones_cd8.pdf", sep = ""), width=13, height=2)
+grid.arrange(grobs = cd8.list, ncol = 6)
+dev.off()
+```
+
+##### check marker of most popular clone
+
+```{r}
+T_cells_V2$barcode <- paste0(T_cells_V2$barcode,"-1")
+```
+
+```{r}
+rownames(T_cells_V2@meta.data) <- T_cells_V2$barcode
+
+```
+
+```{r}
+T_cells_V2 <- JoinLayers(T_cells_V2)
+```
+
+```{r}
+colnames(T_cells_V2[["RNA"]]) <- T_cells_V2$barcode
+```
+
+
+
+```{r}
+DotPlot(T_cells_V2,features = c("Cd3e","Ncr1","Tyrobp","Xcl1","Cd8a","Cd4","Ccr7","Sell","Ly6c1","Tox","Pdcd1","Il4","Il17a","Itgam","Itgax","Cd7","Gzmb","Cx3cr1","Cd40lg","Bcl3","Foxp3","Slamf6","Isg15","Cd69","Trgv2"))+RotatedAxis()
+FeaturePlot(T_cells_V2,features = "Ccr7",reduction = "umap",label = T)
+FeaturePlot(T_cells_V2,features = "Foxp3",reduction = "umap",label = T)
+FeaturePlot(T_cells_V2,features = "Il4",reduction = "umap",label = T)
+FeaturePlot(T_cells_V2,features = "Tyrobp",reduction = "umap",label = T)
+FeaturePlot(T_cells_V2,features = "Isg15",reduction = "umap",label = T)
+FeaturePlot(T_cells_V2,features = "Cd40lg",reduction = "umap",label = T)
+FeaturePlot(T_cells_V2,features = "Gzmb",reduction = "umap",label = T)
+FeaturePlot(T_cells_V2,features = "Gzma",reduction = "umap",label = T)
+FeaturePlot(T_cells_V2,features = "Egr1",reduction = "umap",label = T)
+```
+
+
+
+#### 
+
+
+
+
+```{r}
+library(Matrix)
+T_cells_V2@assays$RNA@layers$counts <- rbind(T_cells_V2@assays$RNA@layers$counts, Matrix(t(as.matrix(tcr_umis_test)), sparse = T))
+T_cells_V2@meta.data <- T_cells_V2@meta.data %>%
+  mutate_if(is.character, as.factor)
+save.image('object_with_tcrs_and_clones.RData')
+```
+
+```{r}
+save(T_cells_V2,file = paste0("T_cells_DF_res06_wTCR.Robj"))
+```
+
+### Create CD8 and CD4 subset based on TCR-seq data
+
+Create new barcode list to make sure that only TCR QC passed cells will be included.
+
+```{r}
+cd8t.cell.barcode <- unique(paste0(cd8.bycell$barcode[cd8.bycell$clonotype_id %in% clons.cd8.filtered$id] ,"-1"))
+```
+
+
+```{r}
+rownames(T_cells_V2@meta.data) <- T_cells_V2$barcode
+```
+
+```{r}
+CD8_byTCR <- subset(T_cells_V2,subset = barcode %in% cd8t.cell.barcode)
+```
+
+```{r}
+DimPlot(CD8_byTCR)
+```
+```{r}
+cd4t.cell.barcode <- unique(paste0(cd4.bycell$barcode[cd4.bycell$clonotype_id %in% clons.cd4.filtered$id] ,"-1"))
+```
+
+```{r}
+CD4_byTCR <- subset(T_cells_V2,subset = barcode %in% cd4t.cell.barcode)
+```
+
+```{r}
+DimPlot(CD4_byTCR)
+```
+
+```{r}
+save(CD8_byTCR,file = "./TCR_outs/CD8_byTCR_V1.Robj")
+save(CD4_byTCR,file = "./TCR_outs/CD4_byTCR_V1.Robj")
+```
+

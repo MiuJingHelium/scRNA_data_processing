@@ -1,0 +1,92 @@
+---
+title: "Whole Dataset Overview"
+output: html_document
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+```
+
+```{r}
+indir = "./R_outs/"
+outdir = "./R_outs/"
+```
+
+```{r}
+load(paste0(outdir,"whole_DoubletFinder.Robj"))
+```
+
+
+```{r}
+DimPlot(whole)
+```
+
+```{r,message=FALSE,warning=FALSE,echo=FALSE}
+Idents(whole) <- whole$RNA_snn_res.0.6
+FeaturePlot(whole, features = c("Ptprc"),label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole, features = c("Cd79a"),label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole, features = c("Cd3e"),label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole, features = c("Cd4"),label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole, features = c("Cd8a"),label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole, features = c("P2ry12"),label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole, features = c("Cd200r3"),label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole, features = c("Ncr1"),label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+```
+
+
+```{r}
+FeaturePlot(whole, features = c("Xcr1"),label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+```
+
+
+```{r,message=FALSE,warning=FALSE,echo=FALSE}
+Idents(whole) <- whole$RNA_snn_res.0.6
+FeaturePlot(whole, features = c("Il7r"),label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole, features = c("Eomes"),label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole, features = c("Il1r1"),label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole, features = c("Rorc"),label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole, features = c("Tbx21"),label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole, features = c("Lyz2"),label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole, features = c("Kit"),label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole, features = c("Gata3"),label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole, features = c("Sell"),label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole, features = c("Tox"),label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+```
+
+```{r}
+genes <- c("Flt3","Xcr1","Siglech","Cd200r3","Mpo","S100a8")
+plts <- lapply(genes,function(x){
+  FeaturePlot(whole, features = x,cells = colnames(whole)[(whole$RNA_snn_res.0.6==14) | (whole$RNA_snn_res.0.6==20)], label = T,split.by = "orig.ident")
+
+})
+g <- gridExtra::grid.arrange(grobs = plts,nrow = 6)
+ggsave(filename = paste0(outdir,"whole_FeaturePlot_small_myeloids.pdf"), plot = g, units = "cm",height = 60,width = 120)
+
+```
+```{r}
+plts[[1]]
+```
+
+
+```{r}
+
+FeaturePlot(whole, features = c("Flt3"),cells = colnames(whole)[(whole$RNA_snn_res.0.6==20)], label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole, features = c("Siglech"),cells = colnames(whole)[ (whole$RNA_snn_res.0.6==20)], label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole, features = c("Flt3"), label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+FeaturePlot(whole, features = c("Siglech"), label = T)+scale_colour_gradientn(colors = c("grey", "red", "purple"))
+```
+```{r}
+FeaturePlot(whole, features = c("Xcr1"),cells = colnames(whole)[(whole$RNA_snn_res.0.6==14)], label = T,split.by = "orig.ident",ncol = 2)
+FeaturePlot(whole, features = c("Cd200r3"),cells = colnames(whole)[(whole$RNA_snn_res.0.6==14)], label = T,split.by = "orig.ident",ncol = 2)
+FeaturePlot(whole, features = c("Mpo"),cells = colnames(whole)[(whole$RNA_snn_res.0.6==14)], label = T,split.by = "orig.ident",ncol = 2)
+FeaturePlot(whole, features = c("S100a8"),cells = colnames(whole)[(whole$RNA_snn_res.0.6==14)], label = T,split.by = "orig.ident",ncol = 2)
+```
+```{r}
+FeaturePlot(whole, features = c("Xcr1"),cells = colnames(whole)[(whole$RNA_snn_res.0.6==14)], label = T)
+FeaturePlot(whole, features = c("Cd200r3"),cells = colnames(whole)[(whole$RNA_snn_res.0.6==14)], label = T)
+FeaturePlot(whole, features = c("Mpo"),cells = colnames(whole)[(whole$RNA_snn_res.0.6==14)], label = T)
+FeaturePlot(whole, features = c("S100a8"),cells = colnames(whole)[(whole$RNA_snn_res.0.6==14)], label = T)
+FeaturePlot(whole, features = c("Flt3"),cells = colnames(whole)[(whole$RNA_snn_res.0.6==14)], label = T)
+```
+

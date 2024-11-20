@@ -1,0 +1,703 @@
+---
+title: "GBM stromal prelim analysis and secondary processing"
+output: html_document
+date: "2024-03-28"
+---
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(harmony)
+```
+
+```{r}
+rds_in <- "data/"
+rds_out <- "data/"
+```
+
+
+```{r}
+load(paste0(rds_in,"GBM_RNA_10_stromal_V1.Robj"))
+```
+
+# check markers of brain resident and vascular cells
+
+```{r}
+Idents(stromal) <- stromal$RNA_snn_res.0.9
+```
+
+```{r}
+colnames(stromal@meta.data)
+```
+
+```{r}
+DimPlot(stromal,reduction = "tsne",label = T)
+```
+
+```{r}
+DotPlot(stromal,features = c("Aqp4","Aldh1l1","Aldoc","Fezf2", "Rorb", "Dbx2","Lhx2","Sox9","Sox10","Olig1","Olig2","Mag","Pdgfra","Gad2","Bcl11b","Sox2","Nfib"),cluster.idents = T) + RotatedAxis()
+```
+
+```{r}
+DotPlot(stromal,features = c("Aqp4","Aldh1l1","Aldoc","Fezf2", "Rorb", "Dbx2","Lhx2","Sox9","Sox10","Olig1","Olig2","Mag","Pdgfra","Gad2","Bcl11b","Sox2","Nfib"),cluster.idents = F) + RotatedAxis()
+```
+
+```{r}
+DotPlot(stromal,features = c("Nes","Sox2","Igfbp7","Pecam1","Myct1","Col1a1","Col5a2","Dlc1","Pdgfrb","Vtn","Anpep","Acta2","Mki67","C1qa"),cluster.idents = T) + RotatedAxis()
+```
+
+```{r}
+DotPlot(stromal,features = c("Sox2","Igfbp7","Pecam1","Myct1","Col1a1","Col5a2","Dlc1","Pdgfrb","Vtn","Anpep","Acta2","Mki67"),cluster.idents = F) + RotatedAxis()
+```
+```{r}
+g <- DotPlot(stromal,features = c("Aqp4","Aldh1l1","Aldoc","Fezf2", "Rorb", "Dbx2","Lhx2","Lamp5","Sox9","Sox10","Olig1","Olig2","Mag","Pdgfra","Gad1","Gad2","Bcl11b","Ppp1r1b","Otx2","Slc17a7","Slc32a1","Sst","Vip","Ndnf","Pvalb","Nfib","Sox2","Nes","Igfbp7","Pecam1","Myct1","Col1a1","Col5a2","Dlc1","Pdgfrb","Vtn","Anpep","Acta2","Mki67","C1qa","Foxp2"),cluster.idents = T) + RotatedAxis()
+ggsave(filename = "stromal_ann_sorted_test.pdf",plot = g, height = 7, width = 15)
+```
+
+```{r}
+g <- DotPlot(stromal,features = c("Aqp4","Aldh1l1","Aldoc","Fezf2", "Rorb", "Dbx2","Lhx2","Sox9","Sox10","Olig1","Olig2","Mag","Pdgfra","Gad1","Gad2","Bcl11b","Ppp1r1b","Otx2","Slc17a7","Slc32a1","Ndnf","Pvalb","Nfib","Sox2","Nes","Foxp2","Igfbp7","Pecam1","Myct1","Col1a1","Col5a2","Dlc1","Pdgfrb","Vtn","Anpep","Acta2","Mki67","C1qa","P2ry12","Ptprc"),cluster.idents = T) + RotatedAxis()
+ggsave(filename = "stromal_ann_sorted.pdf",plot = g, height = 7, width = 15)
+```
+
+Note: Ptprc high clusters exist. Besides one doublet-like cluster, others are likely to be microglia.
+
+# Divide into vascular compartment (true-stromal) and brain-resident cells
+
+vascular cells: 13,0, 11, 27, 26, 14, 18, 15, 21
+brain-resident: the rest (including microglia-like)
+doublet-like: 28, 17, 30
+
+```{r}
+vascular <- subset(stromal,idents = c(13,0, 11, 27, 26, 14, 18, 15, 21))
+```
+
+```{r}
+DimPlot(vascular,reduction = "tsne")
+```
+
+```{r}
+resident <- subset(stromal,idents = c(0:30)[!(c(0:30) %in% c(13,0, 11, 27, 26, 14, 18, 15, 21))])
+```
+
+```{r}
+DimPlot(resident,reduction = "tsne")
+```
+
+```{r}
+vascular[[c(paste0("SCT_snn_res.",seq(0.1,1.5,0.1)))]] <- NULL
+vascular[[c(paste0("RNA_snn_res.",seq(1.1,1.5,0.1)))]] <- NULL
+```
+
+```{r}
+resident[[c(paste0("SCT_snn_res.",seq(0.1,1.5,0.1)))]] <- NULL
+resident[[c(paste0("RNA_snn_res.",seq(1.1,1.5,0.1)))]] <- NULL
+stromal[[c(paste0("SCT_snn_res.",seq(0.1,1.5,0.1)))]] <- NULL
+stromal[[c(paste0("RNA_snn_res.",seq(1.1,1.5,0.1)))]] <- NULL
+```
+
+
+```{r}
+save(vascular,file = paste0(rds_out,"GBM_RNA_10_vascular_V1.Robj"))
+save(resident,file = paste0(rds_out,"GBM_RNA_10_resident_V1.Robj"))
+save(stromal,file = paste0(rds_out,"GBM_RNA_10_stromal_V1.Robj"))
+```
+
+
+## process vascular
+
+### first iteration
+
+```{r}
+vascular <- NormalizeData(vascular,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+vascular <- FindVariableFeatures(object = vascular, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+#VariableFeatures(vascular) <-  VariableFeatures(vascular) [!grepl("^Tra|^Trab|^Igh|^Igk|Mamu-a", VariableFeatures(vascular))]
+VariableFeaturePlot(vascular,selection.method = "mean.var.plot")
+
+vascular <- ScaleData(object = vascular, features = VariableFeatures(object = vascular), vars.to.regress = c("nCount_RNA", "percent.mt"))
+vascular <- RunPCA(object = vascular,
+                features =  VariableFeatures(object = vascular),
+                dims = 1:50)
+gc()
+
+ElbowPlot(vascular,ndims = 50)
+```
+
+```{r}
+vascular <- RunHarmony(object = vascular, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+vascular <- RunUMAP(vascular,dims = 1:30,reduction = "harmony")
+vascular <- RunTSNE(vascular,dims = 1:30,reduction = "harmony")
+
+vascular <- FindNeighbors(vascular, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  vascular <- FindClusters(object = vascular, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DimPlot(vascular,reduction = "tsne",group.by = "orig.ident")
+DimPlot(vascular,reduction = "umap",group.by = "orig.ident")
+```
+
+```{r}
+DimPlot(vascular,reduction = "umap",group.by = "RNA_snn_res.0.1")
+DimPlot(vascular,reduction = "umap",group.by = "RNA_snn_res.1")
+```
+```{r}
+save(vascular,file = paste0(rds_out,"GBM_RNA_10_vascular_V1.Robj"))
+```
+
+```{r}
+Idents(vascular) <- vascular$RNA_snn_res.1
+g <- DotPlot(vascular,features = c("Aqp4","Aldh1l1","Aldoc","Fezf2", "Rorb", "Dbx2","Lhx2","Sox9","Sox10","Olig1","Olig2","Mag","Pdgfra","Gad1","Gad2","Bcl11b","Ppp1r1b","Otx2","Slc17a7","Slc32a1","Ndnf","Pvalb","Nfib","Sox2","Nes","Foxp2","Igfbp7","Pecam1","Myct1","Col1a1","Col5a2","Dlc1","Pdgfrb","Vtn","Anpep","Acta2","Mki67","C1qa","P2ry12","Ptprc"),cluster.idents = T) + RotatedAxis()
+ggsave(filename = "vascular_ann_sorted.pdf",plot = g, height = 7, width = 15)
+```
+
+c15,c16,c17 are doublet-like because of strong co-expression of lineage and cell-type specific markers.
+
+```{r}
+vascular <- subset(vascular, idents = c(0:17)[!(c(0:17) %in% c(15,16,17))])
+```
+
+```{r}
+table(vascular$RNA_snn_res.1)
+```
+
+```{r}
+save(vascular,file = paste0(rds_out,"GBM_RNA_10_vascular_V2.Robj"))
+```
+
+### second iterartion
+
+```{r}
+vascular <- NormalizeData(vascular,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+vascular <- FindVariableFeatures(object = vascular, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+#VariableFeatures(vascular) <-  VariableFeatures(vascular) [!grepl("^Tra|^Trab|^Igh|^Igk|Mamu-a", VariableFeatures(vascular))]
+VariableFeaturePlot(vascular,selection.method = "mean.var.plot")
+
+vascular <- ScaleData(object = vascular, features = VariableFeatures(object = vascular), vars.to.regress = c("nCount_RNA", "percent.mt"))
+vascular <- RunPCA(object = vascular,
+                features =  VariableFeatures(object = vascular),
+                dims = 1:50)
+gc()
+
+ElbowPlot(vascular,ndims = 50)
+vascular <- RunHarmony(object = vascular, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+vascular <- RunUMAP(vascular,dims = 1:30,reduction = "harmony")
+vascular <- RunTSNE(vascular,dims = 1:30,reduction = "harmony")
+
+vascular <- FindNeighbors(vascular, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  vascular <- FindClusters(object = vascular, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+
+save(vascular,file = paste0(rds_out,"GBM_RNA_10_vascular_V2.Robj"))
+```
+```{r}
+DimPlot(vascular,reduction = "tsne",group.by = "orig.ident")
+DimPlot(vascular,reduction = "umap",group.by = "orig.ident")
+```
+
+```{r}
+DimPlot(vascular,reduction = "umap",group.by = "RNA_snn_res.0.1")
+DimPlot(vascular,reduction = "umap",group.by = "RNA_snn_res.1")
+```
+
+
+```{r}
+Idents(vascular) <- vascular$RNA_snn_res.1
+DotPlot(vascular,features = c("Aqp4","Aldh1l1","Aldoc","Fezf2", "Rorb", "Dbx2","Lhx2","Sox9","Sox10","Olig2","Mag","Pdgfra","Gad1","Gad2","Bcl11b","Ppp1r1b","Otx2","Pvalb","Nfib","Sox2","Nes","Foxp2","Igfbp7","Pecam1","Myct1","Col1a1","Col5a2","Dlc1","Pdgfrb","Vtn","Anpep","Acta2","Mki67","P2ry12","Ptprc"),cluster.idents = T)+RotatedAxis()
+```
+c8 is immune-cell-like.c4 and c7 are neuronal-like(Sox2+)
+
+```{r}
+imm_small_vas <- subset(vascular, idents = 8)
+resident_small <- subset(vascular,idents = c(4,7))
+```
+
+```{r}
+save(imm_small_vas,file = paste0(rds_out,"GBM_RNA_10_vascular_V2_imm_small.Robj"))
+```
+
+```{r}
+vascular <- subset(vascular,idents = c(0:15)[!(c(0:15) %in% c(4,7,8))])
+```
+
+```{r}
+save(vascular,file = paste0(rds_out,"GBM_RNA_10_vascular_V2p1.Robj"))
+```
+
+### Third iteration
+
+```{r}
+vascular <- NormalizeData(vascular,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+vascular <- FindVariableFeatures(object = vascular, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+#VariableFeatures(vascular) <-  VariableFeatures(vascular) [!grepl("^Tra|^Trab|^Igh|^Igk|Mamu-a", VariableFeatures(vascular))]
+VariableFeaturePlot(vascular,selection.method = "mean.var.plot")
+
+vascular <- ScaleData(object = vascular, features = VariableFeatures(object = vascular), vars.to.regress = c("nCount_RNA", "percent.mt"))
+vascular <- RunPCA(object = vascular,
+                features =  VariableFeatures(object = vascular),
+                dims = 1:50)
+gc()
+
+ElbowPlot(vascular,ndims = 50)
+```
+
+```{r}
+vascular <- RunHarmony(object = vascular, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+vascular <- RunUMAP(vascular,dims = 1:20,reduction = "harmony")
+vascular <- RunTSNE(vascular,dims = 1:20,reduction = "harmony")
+
+vascular <- FindNeighbors(vascular, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  vascular <- FindClusters(object = vascular, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+
+```
+
+```{r}
+save(vascular,file = paste0(rds_out,"GBM_RNA_10_vascular_V2p1.Robj"))
+```
+
+```{r}
+DimPlot(vascular,reduction = "tsne",group.by = "orig.ident")
+DimPlot(vascular,reduction = "umap",group.by = "orig.ident")
+```
+
+```{r}
+DimPlot(vascular,reduction = "umap",group.by = "RNA_snn_res.0.1")
+DimPlot(vascular,reduction = "umap",group.by = "RNA_snn_res.1",label = T)
+```
+```{r}
+Idents(vascular) <- vascular$RNA_snn_res.1
+DotPlot(vascular,features = c("Aqp4","Aldh1l1","Aldoc","Fezf2", "Rorb", "Dbx2","Lhx2","Sox9","Sox10","Olig2","Mag","Pdgfra","Gad1","Gad2","Bcl11b","Ppp1r1b","Otx2","Pvalb","Nfib","Sox2","Nes","Foxp2","Igfbp7","Pecam1","Myct1","Col1a1","Col5a2","Dlc1","Pdgfrb","Vtn","Anpep","Acta2","Mki67","P2ry12","Ptprc"),cluster.idents = T)+RotatedAxis()
+```
+```{r}
+vascular$compartment <- rep("vascular",nrow(vascular@meta.data))
+```
+
+```{r}
+FeaturePlot(vascular,features = c("Myct1"),reduction = "umap",label = T,order = T)
+FeaturePlot(vascular,features = c("Pdgfra"),reduction = "umap",label = T,order = T)
+FeaturePlot(vascular,features = c("Nes"),reduction = "umap",label = T,order = T)
+FeaturePlot(vascular,features = c("Foxp2"),reduction = "umap",label = T,order = T)
+FeaturePlot(vascular,features = c("Col5a2"),reduction = "umap",label = T,order = T)
+FeaturePlot(vascular,features = c("Acta2"),reduction = "umap",label = T,order = T)
+FeaturePlot(vascular,features = c("Vtn"),reduction = "umap",label = T,order = T)
+```
+
+```{r}
+save(vascular,file = paste0(rds_out,"GBM_RNA_10_vascular_V2p1.Robj"))
+```
+
+```{r}
+Idents(vascular) <- vascular$RNA_snn_res.0.1
+DotPlot(vascular,features = c("Nfib","Sox2","Nes","Foxp2","Igfbp7","Pecam1","Myct1","Col1a1","Col5a2","Dlc1","Pdgfrb","Vtn","Anpep","Acta2","Fos","Bphl","Ttr","Cd63","Mki67"),cluster.idents = T)+RotatedAxis()
+```
+```{r}
+vascular@meta.data <- vascular@meta.data %>% 
+  mutate(annotation_res01 = case_match(
+    as.character(RNA_snn_res.0.1),
+    "0" ~ "Endothelial_1",
+    "1" ~ "Perivascular_1",
+    "2" ~ "Endothelial_2",
+    "3" ~ "Endothelial_3",
+    "4" ~ "Perivascular_2"
+  ),
+  compartment = rep("vascular",nrow(vascular@meta.data)))
+```
+
+```{r}
+table(vascular$compartment)
+table(vascular$annotation_res01)
+```
+
+```{r}
+vascular <- JoinLayers(vascular)
+```
+
+```{r}
+vascular$annotation_V1 <- vascular$annotation_res01
+vascular$annotation_res01 <- NULL
+```
+
+```{r}
+save(vascular,file = paste0(rds_out,"GBM_RNA_10_vascular_V2p1.Robj"))
+```
+
+## process resident
+### first iteration
+
+```{r}
+resident <- NormalizeData(resident,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+resident <- FindVariableFeatures(object = resident, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+#VariableFeatures(vascular) <-  VariableFeatures(vascular) [!grepl("^Tra|^Trab|^Igh|^Igk|Mamu-a", VariableFeatures(vascular))]
+VariableFeaturePlot(resident,selection.method = "mean.var.plot")
+
+resident <- ScaleData(object = resident, features = VariableFeatures(object = resident), vars.to.regress = c("nCount_RNA", "percent.mt"))
+resident <- RunPCA(object = resident,
+                features =  VariableFeatures(object = resident),
+                dims = 1:50)
+gc()
+
+ElbowPlot(resident,ndims = 50)
+```
+
+```{r}
+resident <- RunHarmony(object = resident, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+resident <- RunUMAP(resident,dims = 1:30,reduction = "harmony")
+resident <- RunTSNE(resident,dims = 1:30,reduction = "harmony")
+
+resident <- FindNeighbors(resident, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  resident <- FindClusters(object = resident, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DimPlot(resident,reduction = "tsne",group.by = "orig.ident")
+DimPlot(resident,reduction = "umap",group.by = "orig.ident")
+```
+
+```{r}
+DimPlot(resident,reduction = "umap",group.by = "RNA_snn_res.0.1")
+DimPlot(resident,reduction = "umap",group.by = "RNA_snn_res.1")
+```
+
+```{r}
+save(resident,file = paste0(rds_out,"GBM_RNA_10_resident_V1.Robj"))
+```
+
+```{r}
+Idents(resident) <- resident$RNA_snn_res.1
+g <- DotPlot(resident,features = c("Aqp4","Aldh1l1","Aldoc","Fezf2", "Rorb", "Dbx2","Lhx2","Sox9","Sox10","Olig1","Olig2","Mag","Pdgfra","Gad1","Gad2","Bcl11b","Ppp1r1b","Otx2","Slc17a7","Slc32a1","Ndnf","Pvalb","Nfib","Sox2","Nes","Foxp2","Igfbp7","Pecam1","Myct1","Col1a1","Col5a2","Dlc1","Pdgfrb","Vtn","Anpep","Acta2","Mki67","C1qa","P2ry12","Ptprc"),cluster.idents = T) + RotatedAxis()
+ggsave(filename = "resident_ann_sorted.pdf",plot = g, height = 7, width = 15)
+```
+
+c7 is an immune cell (microglia) cluster. It needs to be isolated and merged back to immune cells.
+c25 is a nestin+ Mki67+ vascular-like cell. It might be a valid vascular cell cluster. But it is Pecam1-.
+c22 is doublet-like because of Ptprc, astrocyte and OL markers, and trace neuron-marker expression.
+c23 is also doublet-like because of overlaying astrocyte, OL and vascular signature.
+
+```{r}
+imm_small <- subset(resident, idents = c(7))
+resident <- subset(resident,idents = c(0:25)[!(c(0:25) %in% c(7,22,23,25))])
+```
+
+```{r}
+save(imm_small,file = paste0(rds_out,"GBM_RNA_10_resident_V1_imm_small.Robj"))
+save(resident,file = paste0(rds_out,"GBM_RNA_10_resident_V2.Robj"))
+```
+
+### second iteration
+
+```{r}
+resident <- NormalizeData(resident,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+resident <- FindVariableFeatures(object = resident, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+#VariableFeatures(vascular) <-  VariableFeatures(vascular) [!grepl("^Tra|^Trab|^Igh|^Igk|Mamu-a", VariableFeatures(vascular))]
+VariableFeaturePlot(resident,selection.method = "mean.var.plot")
+
+resident <- ScaleData(object = resident, features = VariableFeatures(object = resident), vars.to.regress = c("nCount_RNA", "percent.mt"))
+resident <- RunPCA(object = resident,
+                features =  VariableFeatures(object = resident),
+                dims = 1:50)
+gc()
+
+ElbowPlot(resident,ndims = 50)
+resident <- RunHarmony(object = resident, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+resident <- RunUMAP(resident,dims = 1:30,reduction = "harmony")
+resident <- RunTSNE(resident,dims = 1:30,reduction = "harmony")
+
+resident <- FindNeighbors(resident, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  resident <- FindClusters(object = resident, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+
+```
+
+```{r}
+save(resident,file = paste0(rds_out,"GBM_RNA_10_resident_V2.Robj"))
+```
+
+```{r}
+DimPlot(resident,reduction = "tsne",group.by = "orig.ident")
+DimPlot(resident,reduction = "umap",group.by = "orig.ident")
+```
+
+```{r}
+DimPlot(resident,reduction = "umap",group.by = "RNA_snn_res.0.1")
+DimPlot(resident,reduction = "umap",group.by = "RNA_snn_res.1")
+```
+```{r}
+Idents(resident) <- resident$RNA_snn_res.1
+DotPlot(resident,features = c("Aqp4","Aldh1l1","Aldoc","Fezf2", "Rorb", "Dbx2","Lhx2","Sox9","Sox10","Olig2","Mag","Pdgfra","Gad2","Bcl11b","Ppp1r1b","Otx2","Pvalb","Sox2","Nes","Foxp2","Igfbp7","Pecam1","Myct1","Col1a1","Col5a2","Dlc1","Pdgfrb","Vtn","Anpep","Acta2","Mki67","P2ry12","Ptprc"),cluster.idents = T) + RotatedAxis()
+```
+c24 is ptprc+ OL-like cluster. Remove as doublet. c17 is dubious, because of low proportion of cells with high Ptprc, P2ry12, Prcam1, Myct1. There is also some degrees of astrocyte signature. I'll remove this clusters as doublet as well. It is unclear why c25 is very different from rest of OL clusters based on this marker panel, but the cluster size and the difference is indicative of something problematic. Thus, I'll remove c25 as well.
+
+I'll remove these clusters,merge back the small resident-like cluster from the vascular compartment, and start the third iteration.
+
+```{r}
+resident <- subset(resident,idents = c(0:25)[!(c(0:25) %in% c(17,24,25))])
+```
+
+```{r}
+resident <- merge(resident,resident_small)
+```
+
+save it as V2p1 in case of the need to recover some of the clusters.
+
+```{r}
+save(resident,file = paste0(rds_out,"GBM_RNA_10_resident_V2p1.Robj"))
+```
+
+### third iteration
+
+```{r}
+resident <- NormalizeData(resident,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+resident <- FindVariableFeatures(object = resident, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+#VariableFeatures(vascular) <-  VariableFeatures(vascular) [!grepl("^Tra|^Trab|^Igh|^Igk|Mamu-a", VariableFeatures(vascular))]
+VariableFeaturePlot(resident,selection.method = "mean.var.plot")
+
+resident <- ScaleData(object = resident, features = VariableFeatures(object = resident), vars.to.regress = c("nCount_RNA", "percent.mt"))
+resident <- RunPCA(object = resident,
+                features =  VariableFeatures(object = resident),
+                dims = 1:50)
+gc()
+
+ElbowPlot(resident,ndims = 50)
+```
+
+```{r}
+resident <- RunHarmony(object = resident, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+resident <- RunUMAP(resident,dims = 1:30,reduction = "harmony")
+resident <- RunTSNE(resident,dims = 1:30,reduction = "harmony")
+
+resident <- FindNeighbors(resident, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  resident <- FindClusters(object = resident, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+save(resident,file = paste0(rds_out,"GBM_RNA_10_resident_V2p1.Robj"))
+```
+
+```{r}
+DimPlot(resident,reduction = "tsne",group.by = "orig.ident")
+DimPlot(resident,reduction = "umap",group.by = "orig.ident")
+DimPlot(resident,reduction = "umap",group.by = "RNA_snn_res.0.1")
+DimPlot(resident,reduction = "umap",group.by = "RNA_snn_res.1")
+```
+```{r}
+Idents(resident) <- resident$RNA_snn_res.1
+DotPlot(resident,features = c("Aqp4","Aldh1l1","Aldoc","Fezf2", "Rorb", "Dbx2","Lhx2","Sox9","Sox10","Olig2","Mag","Pdgfra","Gad2","Bcl11b","Ppp1r1b","Otx2","Pvalb","Sox2","Nes","Foxp2","Igfbp7","Pecam1","Myct1","Col1a1","Col5a2","Dlc1","Pdgfrb","Vtn","Anpep","Acta2","Mki67","P2ry12","Ptprc"),cluster.idents = T) + RotatedAxis()
+```
+I'll remove c23 as doublet because of its small size and co-expression of immune cell and multiple brain-resident cell markers. c24 possibly a doublet as well because of expression of astrocyte-development genes without clear astrocyte lineage markers and stem-like markers. It's also the smallest cluster. I'll save this as V2p2 in case of the need for recovery.
+
+```{r}
+resident <- subset(resident,idents = c(0:24)[!(c(0:24) %in% c(23,24))])
+```
+
+```{r}
+save(resident,file = paste0(rds_out,"GBM_RNA_10_resident_V2p2.Robj"))
+```
+
+### fourth iteration
+
+```{r}
+resident <- NormalizeData(resident,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+resident <- FindVariableFeatures(object = resident, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+#VariableFeatures(vascular) <-  VariableFeatures(vascular) [!grepl("^Tra|^Trab|^Igh|^Igk|Mamu-a", VariableFeatures(vascular))]
+VariableFeaturePlot(resident,selection.method = "mean.var.plot")
+
+resident <- ScaleData(object = resident, features = VariableFeatures(object = resident), vars.to.regress = c("nCount_RNA", "percent.mt"))
+resident <- RunPCA(object = resident,
+                features =  VariableFeatures(object = resident),
+                dims = 1:50)
+gc()
+
+ElbowPlot(resident,ndims = 50)
+```
+
+```{r}
+resident <- RunHarmony(object = resident, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+resident <- RunUMAP(resident,dims = 1:30,reduction = "harmony")
+resident <- RunTSNE(resident,dims = 1:30,reduction = "harmony")
+
+resident <- FindNeighbors(resident, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  resident <- FindClusters(object = resident, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+save(resident,file = paste0(rds_out,"GBM_RNA_10_resident_V2p2.Robj"))
+```
+
+```{r}
+DimPlot(resident,reduction = "tsne",group.by = "orig.ident",shuffle = T)
+DimPlot(resident,reduction = "umap",group.by = "orig.ident",shuffle = T)
+DimPlot(resident,reduction = "umap",group.by = "RNA_snn_res.0.1",label = T)
+DimPlot(resident,reduction = "umap",group.by = "RNA_snn_res.1",label = T)
+```
+
+```{r}
+Idents(resident) <- resident$RNA_snn_res.1
+DotPlot(resident,features = c("Aqp4","Aldh1l1","Aldoc","Fezf2", "Rorb", "Dbx2","Lhx2","Sox9","Sox10","Olig2","Mag","Pdgfra","Gad2","Bcl11b","Ppp1r1b","Otx2","Pvalb","Sox2","Nes","Foxp2","Igfbp7","Pecam1","Myct1","Col1a1","Col5a2","Dlc1","Pdgfrb","Vtn","Anpep","Acta2","Mki67","P2ry12","Ptprc"),cluster.idents = T) + RotatedAxis()
+```
+
+```{r}
+Idents(resident) <- resident$RNA_snn_res.0.1
+DotPlot(resident,features = c("Aqp4","Aldh1l1","Aldoc","Fezf2", "Rorb", "Dbx2","Lhx2","Sox9","Sox10","Olig2","Mag","Pdgfra","Gad2","Bcl11b","Ppp1r1b","Otx2","Pvalb","Sox2","Nes","Foxp2","Igfbp7","Pecam1","Mki67","P2ry12","Ptprc"),cluster.idents = T) + RotatedAxis()
+```
+
+```{r}
+resident@meta.data <- resident@meta.data %>% 
+  mutate(annotation_res01 = case_match(
+    as.character(RNA_snn_res.0.1),
+    "0" ~ "Oligodendrocyte_1",
+    "1" ~ "Astrocyte_1",
+    "2" ~ "Neutron_1",
+    "3" ~ "Neutron_2",
+    "4" ~ "Astrocyte_2",
+    "5" ~ "Oligodendrocyte_2",
+    "6" ~ "Astrocyte_3",
+    "7" ~ "Progenitor-like_1",
+    "8" ~ "OPC",
+    "9" ~ "Neuron_3",
+    "10" ~ "Astrocyte_4",
+    "11" ~ "Progenitor-like_2"
+  ),
+  compartment = rep("Neuronal",nrow(resident@meta.data)))
+```
+
+```{r}
+resident <- JoinLayers(resident)
+```
+
+```{r}
+resident$annotation_V1 <- resident$annotation_res01
+resident$annotation_res01 <- NULL
+```
+
+```{r}
+save(resident,file = paste0(rds_out,"GBM_RNA_10_resident_V2p2.Robj"))
+```
+
+# Integrate Back to Stromal
+
+
+```{r}
+stromal <- merge(resident,vascular)
+```
+
+
+```{r}
+stromal <- NormalizeData(stromal,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+stromal <- FindVariableFeatures(object = stromal, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+VariableFeaturePlot(stromal,selection.method = "mean.var.plot")
+
+stromal <- ScaleData(object = stromal, features = VariableFeatures(object = stromal), vars.to.regress = c("nCount_RNA", "percent.mt"))
+stromal <- RunPCA(object = stromal,
+                features =  VariableFeatures(object = stromal),
+                dims = 1:50)
+gc()
+ElbowPlot(stromal,ndims = 50)
+```
+
+```{r}
+stromal <- RunHarmony(object = stromal, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+stromal <- RunUMAP(stromal,dims = 1:30,reduction = "harmony")
+stromal <- RunTSNE(stromal,dims = 1:30,reduction = "harmony")
+
+stromal <- FindNeighbors(stromal, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  stromal <- FindClusters(object = stromal, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+stromal <- JoinLayers(stromal)
+```
+
+```{r}
+DimPlot(stromal,reduction = "tsne",group.by = "orig.ident",shuffle = T)
+DimPlot(stromal,reduction = "umap",group.by = "orig.ident",shuffle = T)
+DimPlot(stromal,reduction = "umap",group.by = "RNA_snn_res.0.1",label = T)
+DimPlot(stromal,reduction = "umap",group.by = "RNA_snn_res.1",label = T)
+```
+```{r}
+DimPlot(stromal,reduction = "umap",group.by = "annotation_res01",label.size = 2,label = T)
+DimPlot(stromal,reduction = "umap",group.by = "annotation_res01",split.by = "progress")
+```
+
+
+```{r}
+save(stromal, file = paste0(rds_in,"GBM_RNA_10_stromal_V2.Robj"))
+```
+
+# change metadata name
+
+```{r}
+load(file = paste0(rds_in,"GBM_RNA_10_stromal_V2.Robj"))
+```
+
+```{r}
+colnames(stromal@meta.data)
+```
+
+```{r}
+stromal$annotation_V1 <- stromal$annotation_res01
+```
+
+```{r}
+table(stromal$annotation_V1)
+```
+
+```{r}
+stromal$annotation_res01 <- NULL # clean-up label if necessary
+```
+
+```{r}
+save(stromal, file = paste0(rds_in,"GBM_RNA_10_stromal_V2.Robj"))
+```
+
+The following are pasted from the prelim functional analysis. Some relabeling were performed before functional analysis.
+
+```{r}
+table(stromal$annotation_V1) # annotation derived from subsets
+```
+
+```{r}
+stromal@meta.data <- stromal@meta.data %>% 
+  mutate(annotation_V1 = case_match(
+    annotation_V1,
+    "Neutron_1" ~ "Neuron_1",
+    "Neutron_2" ~ "Neuron_2",
+    .default = annotation_V1
+  ),
+         cell_lineage = case_match(
+    annotation_V1,
+    "Astrocyte_1" ~ "neuronal",
+    "Astrocyte_2" ~ "neuronal",
+    "Astrocyte_3" ~ "neuronal",
+    "Astrocyte_4" ~ "neuronal",
+    "Endothelial_1" ~ "stromal",
+    "Endothelial_2" ~ "stromal",
+    "Endothelial_3" ~ "stromal",
+    "Neuron_3" ~ "neuronal",
+    "Neuron_2" ~ "neuronal",
+    "Neuron_1" ~ "neuronal",
+    "Oligodendrocyte_1" ~ "neuronal",
+    "Oligodendrocyte_2" ~ "neuronal",
+    "OPC" ~ "neuronal",
+    "Perivascular_1" ~ "stromal",
+    "Perivascular_2" ~ "stromal",
+    "Progenitor-like_1" ~ "neuronal",
+    "Progenitor-like_2" ~ "neuronal"
+  ))
+```
+
+```{r}
+save(stromal,file = paste0(indir,"GBM_RNA_10_stromal_V2.Robj"))
+```
+

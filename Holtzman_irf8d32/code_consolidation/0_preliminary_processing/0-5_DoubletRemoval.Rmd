@@ -1,0 +1,677 @@
+---
+title: "doublet removal"
+output: html_document
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony)
+library(DoubletFinder)
+library(miQC)
+library(SoupX)
+library(data.table)
+library(SeuratWrappers) #For miQC
+```
+
+```{r}
+indir = "./R_outs/"
+outdir = "./R_outs/"
+```
+
+```{r load data}
+load(paste0(outdir,"NT_C.Robj"))
+load(paste0(outdir,"NT_KO.Robj"))
+load(paste0(outdir,"T_C.Robj"))
+load(paste0(outdir,"T_KO.Robj"))
+```
+
+```{r DoubletFinder functions}
+paramSweep <- function(seu, PCs=1:10, sct = FALSE, num.cores=1) {
+  require(Seurat); require(fields); require(parallel)
+  ## Set pN-pK param sweep ranges
+  pK <- c(0.0005, 0.001, 0.005, seq(0.01,0.3,by=0.01))
+  pN <- seq(0.05,0.3,by=0.05)
+
+  ## Remove pK values with too few cells
+  min.cells <- round(nrow(seu@meta.data)/(1-0.05) - nrow(seu@meta.data))
+  pK.test <- round(pK*min.cells)
+  pK <- pK[which(pK.test >= 1)]
+
+  ## Extract pre-processing parameters from original data analysis workflow
+  orig.commands <- seu@commands
+
+  ## Down-sample cells to 10000 (when applicable) for computational effiency
+  if (nrow(seu@meta.data) > 10000) {
+    real.cells <- rownames(seu@meta.data)[sample(1:nrow(seu@meta.data), 10000, replace=FALSE)]
+    data <- seu[["RNA"]]$counts[ , real.cells]
+    n.real.cells <- ncol(data)
+  }
+
+  if (nrow(seu@meta.data) <= 10000){
+    real.cells <- rownames(seu@meta.data)
+    data <- seu[["RNA"]]$counts
+    n.real.cells <- ncol(data)
+  }
+
+  ## Iterate through pN, computing pANN vectors at varying pK
+  #no_cores <- detectCores()-1
+  if(num.cores>1){
+    require(parallel)
+    cl <- makeCluster(num.cores)
+    output2 <- mclapply(as.list(1:length(pN)),
+                        FUN = parallel_paramSweep,
+                        n.real.cells,
+                        real.cells,
+                        pK,
+                        pN,
+                        data,
+                        orig.commands,
+                        PCs,
+                        sct,mc.cores=num.cores)
+    stopCluster(cl)
+  }else{
+    output2 <- lapply(as.list(1:length(pN)),
+                      FUN = parallel_paramSweep,
+                      n.real.cells,
+                      real.cells,
+                      pK,
+                      pN,
+                      data,
+                      orig.commands,
+                      PCs,
+                      sct)
+  }
+
+  ## Write parallelized output into list
+  sweep.res.list <- list()
+  list.ind <- 0
+  for(i in 1:length(output2)){
+    for(j in 1:length(output2[[i]])){
+      list.ind <- list.ind + 1
+      sweep.res.list[[list.ind]] <- output2[[i]][[j]]
+    }
+  }
+
+  ## Assign names to list of results
+  name.vec <- NULL
+  for (j in 1:length(pN)) {
+    name.vec <- c(name.vec, paste("pN", pN[j], "pK", pK, sep = "_" ))
+  }
+  names(sweep.res.list) <- name.vec
+  return(sweep.res.list)
+
+}
+
+doubletFinder <- function(seu, PCs, pN = 0.25, pK, nExp, reuse.pANN = FALSE, sct = FALSE, annotations = NULL) {
+  require(Seurat); require(fields); require(KernSmooth)
+
+  ## Generate new list of doublet classificatons from existing pANN vector to save time
+  if (reuse.pANN != FALSE ) {
+    pANN.old <- seu@meta.data[ , reuse.pANN]
+    classifications <- rep("Singlet", length(pANN.old))
+    classifications[order(pANN.old, decreasing=TRUE)[1:nExp]] <- "Doublet"
+    seu@meta.data[, paste("DF.classifications",pN,pK,nExp,sep="_")] <- classifications
+    return(seu)
+  }
+
+  if (reuse.pANN == FALSE) {
+    ## Make merged real-artifical data
+    real.cells <- rownames(seu@meta.data)
+    data <- seu[["RNA"]]$counts[, real.cells]
+    n_real.cells <- length(real.cells)
+    n_doublets <- round(n_real.cells/(1 - pN) - n_real.cells)
+    print(paste("Creating",n_doublets,"artificial doublets...",sep=" "))
+    real.cells1 <- sample(real.cells, n_doublets, replace = TRUE)
+    real.cells2 <- sample(real.cells, n_doublets, replace = TRUE)
+    doublets <- (data[, real.cells1] + data[, real.cells2])/2
+    colnames(doublets) <- paste("X", 1:n_doublets, sep = "")
+    data_wdoublets <- cbind(data, doublets)
+    # Keep track of the types of the simulated doublets
+    if(!is.null(annotations)){
+      stopifnot(typeof(annotations)=="character")
+      stopifnot(length(annotations)==length(Cells(seu)))
+      stopifnot(!any(is.na(annotations)))
+      annotations <- factor(annotations)
+      names(annotations) <- Cells(seu)
+      doublet_types1 <- annotations[real.cells1]
+      doublet_types2 <- annotations[real.cells2]
+    }
+    ## Store important pre-processing information
+    orig.commands <- seu@commands
+
+    ## Pre-process Seurat object
+    if (sct == FALSE) {
+      print("Creating Seurat object...")
+      seu_wdoublets <- CreateSeuratObject(counts = data_wdoublets)
+
+      print("Normalizing Seurat object...")
+      seu_wdoublets <- NormalizeData(seu_wdoublets,
+                                     normalization.method = orig.commands$NormalizeData.RNA@params$normalization.method,
+                                     scale.factor = orig.commands$NormalizeData.RNA@params$scale.factor,
+                                     margin = orig.commands$NormalizeData.RNA@params$margin)
+
+      print("Finding variable genes...")
+      seu_wdoublets <- FindVariableFeatures(seu_wdoublets,
+                                            selection.method = orig.commands$FindVariableFeatures.RNA$selection.method,
+                                            loess.span = orig.commands$FindVariableFeatures.RNA$loess.span,
+                                            clip.max = orig.commands$FindVariableFeatures.RNA$clip.max,
+                                            mean.function = orig.commands$FindVariableFeatures.RNA$mean.function,
+                                            dispersion.function = orig.commands$FindVariableFeatures.RNA$dispersion.function,
+                                            num.bin = orig.commands$FindVariableFeatures.RNA$num.bin,
+                                            binning.method = orig.commands$FindVariableFeatures.RNA$binning.method,
+                                            nfeatures = orig.commands$FindVariableFeatures.RNA$nfeatures,
+                                            mean.cutoff = orig.commands$FindVariableFeatures.RNA$mean.cutoff,
+                                            dispersion.cutoff = orig.commands$FindVariableFeatures.RNA$dispersion.cutoff)
+
+      print("Scaling data...")
+      seu_wdoublets <- ScaleData(seu_wdoublets,
+                                 features = orig.commands$ScaleData.RNA$features,
+                                 model.use = orig.commands$ScaleData.RNA$model.use,
+                                 do.scale = orig.commands$ScaleData.RNA$do.scale,
+                                 do.center = orig.commands$ScaleData.RNA$do.center,
+                                 scale.max = orig.commands$ScaleData.RNA$scale.max,
+                                 block.size = orig.commands$ScaleData.RNA$block.size,
+                                 min.cells.to.block = orig.commands$ScaleData.RNA$min.cells.to.block)
+
+      print("Running PCA...")
+      seu_wdoublets <- RunPCA(seu_wdoublets,
+                              features = orig.commands$ScaleData.RNA$features,
+                              npcs = length(PCs),
+                              rev.pca =  orig.commands$RunPCA.RNA$rev.pca,
+                              weight.by.var = orig.commands$RunPCA.RNA$weight.by.var,
+                              verbose=FALSE)
+      pca.coord <- seu_wdoublets@reductions$pca@cell.embeddings[ , PCs]
+      cell.names <- rownames(seu_wdoublets@meta.data)
+      nCells <- length(cell.names)
+      rm(seu_wdoublets); gc() # Free up memory
+    }
+
+    if (sct == TRUE) {
+      require(sctransform)
+      print("Creating Seurat object...")
+      seu_wdoublets <- CreateSeuratObject(counts = data_wdoublets)
+
+      print("Running SCTransform...")
+      seu_wdoublets <- SCTransform(seu_wdoublets)
+
+      print("Running PCA...")
+      seu_wdoublets <- RunPCA(seu_wdoublets, npcs = length(PCs))
+      pca.coord <- seu_wdoublets@reductions$pca@cell.embeddings[ , PCs]
+      cell.names <- rownames(seu_wdoublets@meta.data)
+      nCells <- length(cell.names)
+      rm(seu_wdoublets); gc()
+    }
+
+    ## Compute PC distance matrix
+    print("Calculating PC distance matrix...")
+    dist.mat <- fields::rdist(pca.coord)
+
+    ## Compute pANN
+    print("Computing pANN...")
+    pANN <- as.data.frame(matrix(0L, nrow = n_real.cells, ncol = 1))
+    if(!is.null(annotations)){
+      neighbor_types <- as.data.frame(matrix(0L, nrow = n_real.cells, ncol = length(levels(doublet_types1))))
+    }
+    rownames(pANN) <- real.cells
+    colnames(pANN) <- "pANN"
+    k <- round(nCells * pK)
+    for (i in 1:n_real.cells) {
+      neighbors <- order(dist.mat[, i])
+      neighbors <- neighbors[2:(k + 1)]
+      pANN$pANN[i] <- length(which(neighbors > n_real.cells))/k
+      if(!is.null(annotations)){
+        for(ct in unique(annotations)){
+          neighbors_that_are_doublets = neighbors[neighbors>n_real.cells]
+          if(length(neighbors_that_are_doublets) > 0){
+            neighbor_types[i,] <-
+              table( doublet_types1[neighbors_that_are_doublets - n_real.cells] ) +
+              table( doublet_types2[neighbors_that_are_doublets - n_real.cells] )
+            neighbor_types[i,] <- neighbor_types[i,] / sum( neighbor_types[i,] )
+          } else {
+            neighbor_types[i,] <- NA
+          }
+        }
+      }
+    }
+    print("Classifying doublets..")
+    classifications <- rep("Singlet",n_real.cells)
+    classifications[order(pANN$pANN[1:n_real.cells], decreasing=TRUE)[1:nExp]] <- "Doublet"
+    seu@meta.data[, paste("pANN",pN,pK,nExp,sep="_")] <- pANN[rownames(seu@meta.data), 1]
+    seu@meta.data[, paste("DF.classifications",pN,pK,nExp,sep="_")] <- classifications
+    if(!is.null(annotations)){
+      colnames(neighbor_types) = levels(doublet_types1)
+      for(ct in levels(doublet_types1)){
+        seu@meta.data[, paste("DF.doublet.contributors",pN,pK,nExp,ct,sep="_")] <- neighbor_types[,ct]
+      }
+    }
+    return(seu)
+  }
+}
+parallel_paramSweep <- function(n, n.real.cells, real.cells, pK, pN, data, orig.commands, PCs, sct)  {
+
+  sweep.res.list = list()
+  list.ind = 0
+
+  ## Make merged real-artifical data
+  print(paste("Creating artificial doublets for pN = ", pN[n]*100,"%",sep=""))
+  n_doublets <- round(n.real.cells/(1 - pN[n]) - n.real.cells)
+  real.cells1 <- sample(real.cells, n_doublets, replace = TRUE)
+  real.cells2 <- sample(real.cells, n_doublets, replace = TRUE)
+  doublets <- (data[, real.cells1] + data[, real.cells2])/2
+  colnames(doublets) <- paste("X", 1:n_doublets, sep = "")
+  data_wdoublets <- cbind(data, doublets)
+
+  ## Pre-process Seurat object
+  if (sct == FALSE) {
+    print("Creating Seurat object...")
+    seu_wdoublets <- CreateSeuratObject(counts = data_wdoublets)
+
+    print("Normalizing Seurat object...")
+    seu_wdoublets <- NormalizeData(seu_wdoublets,
+                                   normalization.method = orig.commands$NormalizeData.RNA@params$normalization.method,
+                                   scale.factor = orig.commands$NormalizeData.RNA@params$scale.factor,
+                                   margin = orig.commands$NormalizeData.RNA@params$margin)
+
+    print("Finding variable genes...")
+    seu_wdoublets <- FindVariableFeatures(seu_wdoublets,
+                                          selection.method = orig.commands$FindVariableFeatures.RNA$selection.method,
+                                          loess.span = orig.commands$FindVariableFeatures.RNA$loess.span,
+                                          clip.max = orig.commands$FindVariableFeatures.RNA$clip.max,
+                                          mean.function = orig.commands$FindVariableFeatures.RNA$mean.function,
+                                          dispersion.function = orig.commands$FindVariableFeatures.RNA$dispersion.function,
+                                          num.bin = orig.commands$FindVariableFeatures.RNA$num.bin,
+                                          binning.method = orig.commands$FindVariableFeatures.RNA$binning.method,
+                                          nfeatures = orig.commands$FindVariableFeatures.RNA$nfeatures,
+                                          mean.cutoff = orig.commands$FindVariableFeatures.RNA$mean.cutoff,
+                                          dispersion.cutoff = orig.commands$FindVariableFeatures.RNA$dispersion.cutoff)
+
+    print("Scaling data...")
+    seu_wdoublets <- ScaleData(seu_wdoublets,
+                               features = orig.commands$ScaleData.RNA$features,
+                               model.use = orig.commands$ScaleData.RNA$model.use,
+                               do.scale = orig.commands$ScaleData.RNA$do.scale,
+                               do.center = orig.commands$ScaleData.RNA$do.center,
+                               scale.max = orig.commands$ScaleData.RNA$scale.max,
+                               block.size = orig.commands$ScaleData.RNA$block.size,
+                               min.cells.to.block = orig.commands$ScaleData.RNA$min.cells.to.block)
+
+    print("Running PCA...")
+    seu_wdoublets <- RunPCA(seu_wdoublets,
+                            features = orig.commands$ScaleData.RNA$features,
+                            npcs = length(PCs),
+                            rev.pca =  orig.commands$RunPCA.RNA$rev.pca,
+                            weight.by.var = orig.commands$RunPCA.RNA$weight.by.var,
+                            verbose=FALSE)
+  }
+
+  if (sct == TRUE) {
+    require(sctransform)
+    print("Creating Seurat object...")
+    seu_wdoublets <- CreateSeuratObject(counts = data_wdoublets)
+
+    print("Running SCTransform...")
+    seu_wdoublets <- SCTransform(seu_wdoublets)
+
+    print("Running PCA...")
+    seu_wdoublets <- RunPCA(seu_wdoublets, npcs = length(PCs))
+  }
+
+  ## Compute PC distance matrix
+  print("Calculating PC distance matrix...")
+  nCells <- nrow(seu_wdoublets@meta.data)
+  pca.coord <- seu_wdoublets@reductions$pca@cell.embeddings[ , PCs]
+  rm(seu_wdoublets)
+  gc()
+  dist.mat <- fields::rdist(pca.coord)[,1:n.real.cells]
+
+  ## Pre-order PC distance matrix prior to iterating across pK for pANN computations
+  print("Defining neighborhoods...")
+  for (i in 1:n.real.cells) {
+    dist.mat[,i] <- order(dist.mat[,i])
+  }
+
+  ## Trim PC distance matrix for faster manipulations
+  ind <- round(nCells * max(pK))+5
+  dist.mat <- dist.mat[1:ind, ]
+
+  ## Compute pANN across pK sweep
+  print("Computing pANN across all pK...")
+  for (k in 1:length(pK)) {
+    print(paste("pK = ", pK[k], "...", sep = ""))
+    pk.temp <- round(nCells * pK[k])
+    pANN <- as.data.frame(matrix(0L, nrow = n.real.cells, ncol = 1))
+    colnames(pANN) <- "pANN"
+    rownames(pANN) <- real.cells
+    list.ind <- list.ind + 1
+
+    for (i in 1:n.real.cells) {
+      neighbors <- dist.mat[2:(pk.temp + 1),i]
+      pANN$pANN[i] <- length(which(neighbors > n.real.cells))/pk.temp
+    }
+
+    sweep.res.list[[list.ind]] <- pANN
+
+  }
+
+  return(sweep.res.list)
+}
+```
+
+## NT_C
+
+```{r NT_C sweep}
+sweep.res.list <- paramSweep(NT_C, PCs = 1:30, sct = FALSE)
+
+
+sweep.stats <- summarizeSweep(sweep.res.list, GT = FALSE)
+
+
+
+
+bcmvn <- find.pK(sweep.stats)
+
+
+homotypic.prop <- modelHomotypic(NT_C@meta.data$seurat_clusters)          
+nExp_poi <- round(0.05*nrow( NT_C@meta.data))  ## Assuming 5% doublet formation rate 
+nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop))
+
+```
+
+```{r}
+ NT_C <- doubletFinder( NT_C, PCs = 1:30, pN = 0.25, pK = 0.09, nExp = nExp_poi, reuse.pANN = FALSE, sct = FALSE)
+
+head(NT_C@meta.data) # This is too much for whole
+
+
+```
+
+```{r}
+FeaturePlot( NT_C,features = "pANN_0.25_0.09_122",reduction = "umap")
+DimPlot(NT_C,reduction = "umap",group.by = "DF.classifications_0.25_0.09_122")
+FeaturePlot( NT_C,features = "Cd4",reduction = "umap")
+FeaturePlot( NT_C,features = "Cd8a",reduction = "umap")
+```
+```{r}
+NT_C <- subset(NT_C,subset = DF.classifications_0.25_0.09_122 == "Singlet")
+```
+
+```{r}
+save(NT_C,file = paste0(outdir,"NT_C_doubRemoved.Robj"))
+```
+
+## NT_KO
+
+```{r NT_KO sweep}
+sweep.res.list <- paramSweep(NT_KO, PCs = 1:30, sct = FALSE)
+
+
+sweep.stats <- summarizeSweep(sweep.res.list, GT = FALSE)
+
+
+
+
+bcmvn <- find.pK(sweep.stats)
+
+
+homotypic.prop <- modelHomotypic(NT_KO@meta.data$seurat_clusters)          
+nExp_poi <- round(0.05*nrow( NT_KO@meta.data))  ## Assuming 5% doublet formation rate 
+nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop))
+
+NT_KO <- doubletFinder( NT_KO, PCs = 1:30, pN = 0.25, pK = 0.09, nExp = nExp_poi, reuse.pANN = FALSE, sct = FALSE)
+
+head(NT_KO@meta.data) # This is too much for whole
+
+
+```
+
+
+```{r}
+FeaturePlot( NT_KO,features = "pANN_0.25_0.09_163",reduction = "umap")
+DimPlot(NT_KO,reduction = "umap",group.by = "DF.classifications_0.25_0.09_163")
+FeaturePlot( NT_KO,features = "Cd4",reduction = "umap")
+FeaturePlot( NT_KO,features = "Cd8a",reduction = "umap")
+```
+
+```{r}
+NT_KO <- subset(NT_KO,subset = DF.classifications_0.25_0.09_163 == "Singlet")
+```
+
+```{r}
+save(NT_KO,file = paste0(outdir,"NT_KO_doubRemoved.Robj"))
+```
+
+
+## T_C
+
+```{r}
+sweep.res.list <- paramSweep(T_C, PCs = 1:30, sct = FALSE)
+
+
+sweep.stats <- summarizeSweep(sweep.res.list, GT = FALSE)
+
+
+
+
+bcmvn <- find.pK(sweep.stats)
+
+
+homotypic.prop <- modelHomotypic(T_C@meta.data$seurat_clusters)          
+nExp_poi <- round(0.05*nrow(T_C@meta.data))  ## Assuming 5% doublet formation rate 
+nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop))
+
+T_C <- doubletFinder(T_C, PCs = 1:30, pN = 0.25, pK = 0.09, nExp = nExp_poi, reuse.pANN = FALSE, sct = FALSE)
+
+head(T_C@meta.data) # This is too much for whole
+
+```
+
+```{r}
+FeaturePlot(T_C,features = "pANN_0.25_0.09_328",reduction = "umap")
+DimPlot(T_C,reduction = "umap",group.by = "DF.classifications_0.25_0.09_328")
+FeaturePlot(T_C,features = "Cd4",reduction = "umap")
+FeaturePlot(T_C,features = "Cd8a",reduction = "umap")
+```
+
+```{r}
+T_C <- subset(T_C,subset = DF.classifications_0.25_0.09_328 == "Singlet")
+```
+
+```{r}
+save(T_C,file = paste0(outdir,"T_C_doubRemoved.Robj"))
+```
+
+
+
+
+## T_KO
+
+```{r}
+sweep.res.list <- paramSweep(T_KO, PCs = 1:30, sct = FALSE)
+
+
+sweep.stats <- summarizeSweep(sweep.res.list, GT = FALSE)
+
+
+
+
+bcmvn <- find.pK(sweep.stats)
+
+
+homotypic.prop <- modelHomotypic(T_KO@meta.data$seurat_clusters)          
+nExp_poi <- round(0.05*nrow( T_KO@meta.data))  ## Assuming 5% doublet formation rate 
+nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop))
+
+T_KO <- doubletFinder( T_KO, PCs = 1:30, pN = 0.25, pK = 0.09, nExp = nExp_poi, reuse.pANN = FALSE, sct = FALSE)
+
+head(T_KO@meta.data) # This is too much for whole
+
+```
+
+```{r}
+FeaturePlot( T_KO,features = "pANN_0.25_0.09_384",reduction = "umap")
+DimPlot(T_KO,reduction = "umap",group.by = "DF.classifications_0.25_0.09_384")
+FeaturePlot( T_KO,features = "Cd4",reduction = "umap")
+FeaturePlot( T_KO,features = "Cd8a",reduction = "umap")
+```
+
+```{r}
+T_KO <- subset(T_KO,subset = DF.classifications_0.25_0.09_384 == "Singlet")
+```
+
+```{r}
+save(T_KO,file = paste0(outdir,"T_KO_doubRemoved.Robj"))
+```
+
+## merge and analyzw
+
+```{r}
+whole <- merge(x=NT_C,y=c(NT_KO,T_C,T_KO),add.cell.ids=c("NT_C","NT_KO","T_C","T_KO"))
+```
+
+```{r }
+NTC_range = range(grep("^NT_C",rownames(whole@meta.data)))
+
+whole@meta.data$orig.ident[NTC_range[1]:NTC_range[2]] <- "NT_C"
+
+NTKO_range = range(grep("^NT_KO",rownames(whole@meta.data)))
+
+whole@meta.data$orig.ident[NTKO_range[1]:NTKO_range[2]] <- "NT_KO"
+
+TC_range = range(grep("^T_C",rownames(whole@meta.data)))
+
+whole@meta.data$orig.ident[TC_range[1]:TC_range[2]] <- "T_C"
+
+TKO_range = range(grep("^T_KO",rownames(whole@meta.data)))
+
+whole@meta.data$orig.ident[TKO_range[1]:TKO_range[2]] <- "T_KO"
+```
+
+
+```{r}
+whole$DF.classifications_0.25_0.09_122 <- NULL
+whole$DF.classifications_0.25_0.09_163 <- NULL
+whole$DF.classifications_0.25_0.09_328 <- NULL
+whole$DF.classifications_0.25_0.09_384 <- NULL
+```
+
+```{r }
+table(whole@meta.data$orig.ident)
+```
+
+```{r eval=F}
+save(whole,file = paste0(outdir,"whole_DoubletFinder.Robj"))
+```
+
+```{r}
+whole <- NormalizeData(object = whole, normalization.method = "LogNormalize", scale.factor = 10000)
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(whole) <-  VariableFeatures(whole) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(whole))]
+VariableFeaturePlot(whole)
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+```
+
+```{r}
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+whole <- RunUMAP(whole,dims = 1:40,reduction = "harmony")
+whole <- RunTSNE(whole,dims = 1:40,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:40,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r eval=F}
+save(whole,file = paste0(outdir,"whole_DoubletFinder.Robj"))
+```
+
+```{r}
+load(paste0(outdir,"whole_DoubletFinder.Robj"))
+```
+
+```{r}
+DimPlot(whole, reduction = "umap",label = T)
+```
+
+```{r}
+DimPlot(whole, reduction = "umap",label = T,split.by = "orig.ident",ncol = 2)
+
+```
+
+```{r}
+DimPlot(whole, reduction = "umap",group.by = "RNA_snn_res.0.1",label = T)
+```
+
+
+```{r}
+DimPlot(whole, reduction = "umap",group.by = "orig.ident",shuffle = T)
+DimPlot(whole, reduction = "umap",group.by = "RNA_snn_res.0.6",label = T)
+DimPlot(whole, reduction = "umap")
+DimPlot(whole, reduction = "tsne")
+FeaturePlot(whole,features = c("Cd8a"))
+FeaturePlot(whole,features = c("Cd19"))
+DimPlot(whole, reduction = "umap",group.by = "miQC.keep",shuffle = T)
+DotPlot(whole,features = c("Cd3e","Cd8a","Cd4","Cd19","Cd44","Ncam1","Xcr1","Ncr1","Siglech","S100a8","Ccr2","Fcer1a","Fcer2a","Flt3"))+RotatedAxis()
+```
+
+```{r}
+VlnPlot(whole, features = c("percent.mt","nFeature_RNA_log10","nCount_RNA_log10"),group.by = "orig.ident")
+```
+
+```{r}
+DotPlot(whole,features = c("Cd3e","Cd8a","Cd4","Cd19","Lyz2","Fn1","Xcr1","P2ry12","Ncr1","Siglech","S100a8","Mpo","Fcer2a","Flt3","Cd200r3","Gata3","Il7r","Mki67"),group.by = "RNA_snn_res.0.6")+RotatedAxis()
+```
+
+```{r}
+VlnPlot(whole, features = c("Cd3e"),group.by = "RNA_snn_res.0.6")
+Idents(whole) <- whole$RNA_snn_res.0.6
+FeaturePlot(whole,features = c("Cd3e"),label = T)
+```
+
+```{r}
+VlnPlot(whole, features = c("Cd19"),group.by = "RNA_snn_res.0.6")
+Idents(whole) <- whole$RNA_snn_res.0.6
+FeaturePlot(whole,features = c("Cd19"),label = T)
+```
+```{r}
+VlnPlot(whole, features = c("Cd8a"),group.by = "RNA_snn_res.0.6")
+Idents(whole) <- whole$RNA_snn_res.0.6
+FeaturePlot(whole,features = c("Cd8a"),label = T)
+```
+
+```{r}
+VlnPlot(whole, features = c("Ncr1"),group.by = "RNA_snn_res.0.1")
+Idents(whole) <- whole$RNA_snn_res.0.1
+FeaturePlot(whole,features = c("Ncr1"),label = T)
+```
+
+```{r}
+cluster_prop <- whole@meta.data %>% group_by(orig.ident,RNA_snn_res.0.6) %>%
+  summarise(n = n()) %>% mutate(proportion = 100*n/sum(n))
+
+p1 <- ggplot(cluster_prop,aes(x = orig.ident, y = proportion,fill = orig.ident))+
+  geom_bar(stat = "identity", position = 'dodge')+
+  facet_wrap(~RNA_snn_res.0.6,scales = "free")+guides(fill=guide_legend(title="Condition"))+ ylab("Percentage of all cells")+
+  theme(
+  plot.title = element_blank(),
+  axis.title.x = element_blank())+RotatedAxis()
+p1
+g <- gridExtra::grid.arrange(grobs = list(p1),nrow = 2)
+ggsave(filename = paste0(outdir,"Proportion_barplots_res06_whole_DF_V2.pdf"), plot = g, units = "cm",height = 30,width = 20)
+```
+
+
+```{r}
+T_cells <- subset(whole, idents = c(0,1,2,4,5,7,8,12,13,17))
+save(T_cells,file = paste0(outdir,"T_cells_DF_res06.Robj"))
+```
+
+
+

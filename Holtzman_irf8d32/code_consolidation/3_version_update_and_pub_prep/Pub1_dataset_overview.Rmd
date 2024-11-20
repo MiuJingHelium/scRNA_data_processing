@@ -1,0 +1,421 @@
+---
+title: 'publication submission prep: all cells'
+output: html_document
+date: "2024-08-02"
+---
+
+This is the Rmd for preparing seurat object and its figures including all QC passed cells.
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(RColorBrewer)
+```
+
+```{r}
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+
+```
+
+
+```{r}
+RDSdir <- "../V2_processing_analysis/R_outs/"
+outdir <- "plots/"
+if (!dir.exists(outdir)) dir.create(outdir)
+```
+
+# create new object
+
+checking the processing history, the conventional T cell subset of lymphocytes were additionally filtered, so I'll load the V2p1 whole object merged with vague, check for the vague cells, and filter out cells not included in the V3 conventional T cells.
+
+```{r}
+load(paste0(RDSdir,"lymphoid_convT_V3p1_merged_scRep.Robj"))
+load(paste0(RDSdir,"whole_V2p1_merged.Robj"))
+```
+
+```{r}
+colnames(whole@meta.data)
+```
+
+```{r}
+DimPlot(whole,group.by = "annotation_prelim")
+DimPlot(whole,group.by = "celltype") # B cells are mislabeled as myeloids
+```
+
+```{r}
+FeaturePlot(whole, features = c("P2ry12","Sparc"))
+FeaturePlot(whole, features = c("Hexb","Sall1"))
+```
+
+The "microglia" may be macrophage and microglia.
+
+Let's first remove the artifact cells.
+
+```{r}
+colnames(screp@meta.data)
+```
+
+
+```{r}
+DimPlot(screp,group.by = "celltype")
+```
+
+```{r}
+nonConvT <- subset(whole, subset = (celltype != "CD4T" )& (celltype != "CD8T") & (celltype != "Proliferating T") )
+```
+
+```{r}
+table(whole$celltype)
+table(nonConvT$celltype)
+```
+
+```{r}
+convT = screp
+```
+```{r}
+colnames(convT@meta.data)
+colnames(nonConvT@meta.data)
+```
+
+
+```{r}
+convT$miQC.keep <- NULL
+convT$CTaa <- NULL
+convT$CTgene <- NULL
+convT$CTstrict <- NULL
+convT$CTnt <- NULL
+convT$Frequency <- NULL
+convT$cloneType <- NULL
+convT$highlight <- NULL
+
+nonConvT$pANN_0.25_0.09_122 <- NULL
+nonConvT$pANN_0.25_0.09_163 <- NULL
+nonConvT$pANN_0.25_0.09_328 <- NULL
+nonConvT$pANN_0.25_0.09_384 <- NULL
+nonConvT$barcodes <- NULL
+
+
+```
+
+```{r}
+colnames(convT@meta.data)
+colnames(nonConvT@meta.data)
+```
+```{r}
+nonConvT$miQC.probability <- NULL
+nonConvT$miQC.keep <- NULL
+```
+
+```{r}
+colnames(convT@meta.data)
+colnames(nonConvT@meta.data)
+```
+
+re-generate whole
+
+```{r}
+whole <- merge(convT,nonConvT)
+```
+
+
+```{r}
+whole <- NormalizeData(object = whole, normalization.method = "LogNormalize", scale.factor = 10000)
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(whole) <-  VariableFeatures(whole) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(whole))]
+VariableFeaturePlot(whole)
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+
+```
+
+```{r}
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+whole <- RunUMAP(whole,dims = 1:30,reduction = "harmony")
+whole <- RunTSNE(whole,dims = 1:30,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+whole <- JoinLayers(whole)
+```
+
+```{r}
+DimPlot(whole,group.by = "RNA_snn_res.1")
+
+```
+
+```{r}
+Idents(whole) <- "RNA_snn_res.1"
+FeaturePlot(whole,features = c("Cd3d"),label = T)
+FeaturePlot(whole,features = c("Cd8a"),label = T)
+FeaturePlot(whole,features = c("Cd4"),label = T)
+FeaturePlot(whole,features = c("Klrb1c"),label = T)
+FeaturePlot(whole,features = c("Ncr1"),label = T)
+FeaturePlot(whole,features = c("Cd79a"),label = T)
+FeaturePlot(whole,features = c("Gata3"),label = T)
+FeaturePlot(whole,features = c("Rorc"),label = T)
+FeaturePlot(whole,features = c("Mpo"),label = T)
+FeaturePlot(whole,features = c("Flt3"),label = T)
+FeaturePlot(whole,features = c("Xcr1"),label = T)
+FeaturePlot(whole,features = c("Siglech"),label = T)
+FeaturePlot(whole,features = c("Sirpa"),label = T)
+FeaturePlot(whole,features = c("P2ry12"),label = T)
+FeaturePlot(whole,features = c("Adgre1"),label = T)
+FeaturePlot(whole,features = c("Ccr2"),label = T)
+FeaturePlot(whole,features = c("Mki67"),label = T)
+```
+
+```{r}
+FeaturePlot(whole,features = c("Sall1"),label = T,order = T)
+FeaturePlot(whole,features = c("Mertk"),label = T)
+FeaturePlot(whole,features = c("Hexb"),label = T)
+FeaturePlot(whole,features = c("Sparc"),label = T)
+
+# monocytes
+FeaturePlot(whole,features = "Ace",label = T)
+FeaturePlot(whole,features = "Itgal",label = T)
+FeaturePlot(whole,features = "Ly6c2",label = T)
+```
+
+
+```{r}
+DimPlot(whole,group.by = "annotation_prelim")+scale_color_manual(values = pal)
+DimPlot(whole,group.by = "celltype")+scale_color_manual(values = pal)
+```
+```{r}
+table(whole$annotation_prelim)
+```
+
+
+```{r}
+whole@meta.data <- whole@meta.data %>% mutate(
+  celltype = case_match(
+    annotation_prelim,
+    "B_cell_1" ~ "B_cell",
+    "B_cell_2" ~ "B_cell",
+    "B_cell_3" ~ "B_cell",
+    "Microglia_1" ~ "Myeloid",
+    "Microglia_2" ~ "Myeloid",
+    "Other myeloids" ~ "Myeloid",
+    .default = celltype
+  )
+)
+```
+
+```{r}
+DimPlot(whole,group.by = "celltype")+scale_color_manual(values = pal)
+```
+
+```{r}
+whole@meta.data <- whole@meta.data %>% mutate(
+  celltype = case_match(
+    as.character(RNA_snn_res.1),
+    "20" ~ "pDC",
+    "13" ~ "Neutrophil and DC",
+    "17" ~ "Microglia",
+    "14" ~ "Microglia",
+    .default = celltype
+  )
+)
+```
+
+
+```{r}
+DimPlot(whole,group.by = "celltype")+scale_color_manual(values = pal)
+```
+
+```{r}
+colnames(whole@meta.data)
+```
+```{r}
+whole$clono_avail <- NULL
+whole$NKT_TCR <- NULL
+whole$CD4_TCR <- NULL
+whole$CD8_TCR <- NULL
+```
+
+
+```{r}
+save(whole,file = paste0(RDSdir,"whole_V3.Robj"))
+```
+
+# make figures
+
+```{r}
+load(paste0(RDSdir,"whole_V3.Robj"))
+```
+
+```{r}
+whole@meta.data <- whole@meta.data %>%
+  mutate(ann_res02 = case_match(
+    as.character(RNA_snn_res.0.2),
+    "0" ~ "0 : CD8 T",
+    "1" ~ "1 : NK",
+    "2" ~ "2 : CD4 T",
+    "3" ~ "3 : NKT",
+    "4" ~ "4 : B cells",
+    "5" ~ "5 : DN T",
+    "6" ~ "6 : ILC3",
+    "7" ~ "7 : Myeloid and cycling T",
+    "8" ~ "8 : Microglia",
+    "9" ~ "9 : NK",
+    "10" ~ "10 : pDC"
+   ))
+```
+
+```{r}
+table(whole$orig.ident)
+```
+
+```{r}
+range(whole$percent.mt)
+```
+
+```{r}
+range(whole$nFeature_RNA_log10)
+```
+
+```{r}
+range(whole$nCount_RNA_log10)
+```
+
+```{r}
+meta <- whole@meta.data
+meta <- cbind(meta, whole@reductions$umap@cell.embeddings)
+```
+
+```{r}
+DimPlot(whole, group.by = "RNA_snn_res.0.2")+ scale_color_manual(values = pal)
+```
+
+```{r}
+DimPlot(whole, group.by = "RNA_snn_res.0.2")+ scale_color_manual(values = c(pal[1:7],pal[10],pal[13:14],pal[18]))
+```
+
+
+
+## Fig 2 Overview UMAP
+
+```{r}
+p1 <- DimPlot(whole, group.by = "RNA_snn_res.0.2")+ scale_color_manual(values = c(pal[1:7],pal[10],pal[13:14],pal[18]))
+p2 <- DimPlot(whole, group.by = "RNA_snn_res.0.2")+ scale_color_manual(values = c(pal[1:7],pal[10],pal[13:14],pal[18])) + ggtitle("")
+g <- gridExtra::grid.arrange(grobs = list(p1,p2), ncol = 2)
+ggsave(filename = paste0(outdir,"/Fig2_UMAP_plain_unannotated.pdf"),plot = g, width = 18,height = 6)
+```
+
+```{r}
+p1 <- DimPlot(whole, group.by = "ann_res02")+ scale_color_manual(values = c(pal[1:7],pal[10],pal[13:14],pal[18]))
+p2 <- DimPlot(whole, group.by = "ann_res02")+ scale_color_manual(values = c(pal[1:7],pal[10],pal[13:14],pal[18])) + ggtitle("")
+g <- gridExtra::grid.arrange(grobs = list(p1,p2), ncol = 2)
+ggsave(filename = paste0(outdir,"/Fig2_UMAP_plain.pdf"),plot = g, width = 18,height = 6)
+```
+
+## Fig 2 Feature Plots
+
+```{r}
+genes <- c("Cd3e", "Ncr1", "Cd8a", "Cd4", "Klrb1c", "Cd79a", "Cxcr6", "Rorc","Gata3", "Trem2", "Mki67", "Siglech","Mpo", "Flt3","Sirpa","Csf1r")
+```
+
+```{r}
+glist <- lapply(genes, function(x){
+  FeaturePlot(whole,features = x)+scale_color_gradientn(colours = c("grey90","red2","darkred"))
+})
+g <- gridExtra::grid.arrange(grobs = glist, ncol = 4)
+ggsave(filename = paste0(outdir,"/Fig2_FeaturePlots.pdf"),plot = g, width = 16, height = 14)
+```
+
+## Fig 2 Dotplots
+
+```{r}
+g <- DotPlot(whole, group.by = "RNA_snn_res.0.2",features = c("Ptprc","Cd3e", "Ncr1","Tyrobp", "Cd8a", "Cd4", "Ccr7","Sell","Prf1","Gzma","Ifit3","Klrb1c","Cd19","Cd79a", "Cxcr6", "Rorc","Gata3","Tox", "Trem2", "Mki67", "Ccr2","Itgam","Itgax","Siglech","Mpo", "Flt3","Xcr1","Sirpa","Csf1r"))+RotatedAxis()+scale_color_gradientn(colours = c("grey90","red2","darkred"))
+ggsave(filename = paste0(outdir,"/Fig2_DotPlots.pdf"),plot = g, width = 10, height = 6)
+```
+
+## Fig 2 export for heatmap
+
+```{r}
+avgExp <- AggregateExpression(whole,features = c("Cd3e", "Ncr1","Tyrobp", "Cd8a", "Cd4", "Ccr7","Sell","Prf1","Gzma","Ifit3","Klrb1c","Cd19","Cd79a", "Cxcr6", "Rorc","Gata3","Tox", "Trem2", "Mki67", "Ccr2","Itgam","Itgax","Siglech","Mpo", "Flt3","Xcr1","Sirpa","Csf1r"), group.by = "RNA_snn_res.0.2",return.seurat = T)
+```
+
+```{r}
+exp_mat <- as.data.frame(avgExp@assays[["RNA"]]@layers[["scale.data"]])
+rownames(exp_mat) <- rownames(avgExp)
+colnames(exp_mat) <- colnames(avgExp)
+exp_mat <- cbind(gene = rownames(exp_mat), exp_mat)
+exp_mat$gene = factor(exp_mat$gene, levels = c("Ptprc","Cd3e", "Ncr1","Tyrobp", "Cd8a", "Cd4", "Ccr7","Sell","Prf1","Gzma","Ifit3","Klrb1c","Cd19","Cd79a", "Cxcr6", "Rorc","Gata3","Tox", "Trem2", "Mki67", "Ccr2","Itgam","Itgax","Siglech","Mpo", "Flt3","Xcr1","Sirpa","Csf1r"))
+exp_mat <- exp_mat[order(exp_mat$gene),]
+```
+
+```{r}
+write.table(exp_mat,file = "whole_avgExp_markers.tsv",sep = "\t", col.names = T, row.names = F, quote = F)
+```
+
+
+```{r}
+DoHeatmap(avgExp,features = c("Cd3e", "Ncr1","Tyrobp", "Cd8a", "Cd4", "Ccr7","Sell","Prf1","Gzma","Ifit3","Klrb1c","Cd19","Cd79a", "Cxcr6", "Rorc","Gata3","Tox", "Trem2", "Mki67", "Ccr2","Itgam","Itgax","Siglech","Mpo", "Flt3","Xcr1","Sirpa","Csf1r"),draw.lines = F )
+```
+
+## Fig 2 Density plot split by condition
+
+```{r}
+g <- ggplot(meta, aes(x = umap_1, y = umap_2)) +
+  geom_point(aes(color = RNA_snn_res.0.2),alpha = 0.6,size = 0.5) +
+  geom_density_2d_filled(alpha = 0.5,bins = 7) +
+  geom_density_2d(colour = "black",alpha = 0.6,bins = 7)+
+  scale_fill_manual(values = c('white','#fed976','#feb24c','#fd8d3c','#fc4e2a','#e31a1c','#b10026'))+ #'#ffffd4'
+  scale_color_manual(values = c(pal[1:7],pal[10],pal[13:14],pal[18]))+
+  theme_classic()+
+  xlim(c(-9.5,14))+
+   ylim(c(-8,8))+
+  facet_wrap(~orig.ident,ncol = 2)+
+ guides(fill = guide_legend(title = "Level",ncol = 2),
+        color = guide_legend(ncol = 3))
+g
+ggsave(filename = paste0(outdir,"/Fig2_density_plot_res02.pdf"),width = 12,height = 10)
+```
+## Fig 2 res02 proportion plots
+
+```{r}
+res02_prop <- meta %>% group_by(RNA_snn_res.0.2,orig.ident) %>% summarise(cluster_size = n()) %>% ungroup() %>% group_by(orig.ident) %>% mutate(cluster_proportion = cluster_size*100/sum(cluster_size))
+```
+
+```{r}
+g <- ggplot(res02_prop) +
+  geom_bar(aes(x = orig.ident, y = cluster_proportion,fill = orig.ident),stat = "identity",position = "dodge") +
+  facet_wrap(~RNA_snn_res.0.2, scales = "free")+
+  ylab("% in immune cells")+
+  xlab("Condition")+
+  theme(axis.text.x = element_text(angle = 45,hjust = 1))
+g
+ggsave(filename = paste0(outdir,"/Fig2_res02_proportion_unannotated.pdf"),width = 12,height = 10)
+```
+
+```{r}
+res02_prop <- meta %>% group_by(ann_res02,orig.ident) %>% summarise(cluster_size = n()) %>% ungroup() %>% group_by(orig.ident) %>% mutate(cluster_proportion = cluster_size*100/sum(cluster_size))
+```
+
+```{r}
+g <- ggplot(res02_prop) +
+  geom_bar(aes(x = orig.ident, y = cluster_proportion,fill = orig.ident),stat = "identity",position = "dodge") +
+  facet_wrap(~ann_res02, scales = "free")+
+  ylab("% in immune cells")+
+  xlab("Condition")+
+  theme(axis.text.x = element_text(angle = 45,hjust = 1))
+g
+ggsave(filename = paste0(outdir,"/Fig2_res02_proportion_annotated.pdf"),width = 12,height = 10)
+```
+

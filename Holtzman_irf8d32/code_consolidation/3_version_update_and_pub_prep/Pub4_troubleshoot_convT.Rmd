@@ -1,0 +1,133 @@
+---
+title: "Pub4_troubleshoot_convT"
+output: html_document
+date: "2024-08-19"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(RColorBrewer)
+library(harmony)
+```
+
+```{r}
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+
+```
+
+```{r}
+RDSdir <- "../V2_processing_analysis/R_outs/"
+load(paste0(RDSdir,"lymphoid_convT_V3p2_merged_scRep.Robj"))
+```
+
+## regress out ribosomal genes
+
+```{r}
+PercentageFeatureSet(screp.aa,pattern="^Rp[ls]") -> screp.aa$percent.ribo
+```
+
+```{r}
+head(screp.aa$percent.ribo)
+```
+
+```{r}
+screp.aa <- FindVariableFeatures(object = screp.aa, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(screp.aa) <-  VariableFeatures(screp.aa) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(screp.aa))]
+VariableFeaturePlot(screp.aa)
+screp.aa <- ScaleData(object = screp.aa, features = VariableFeatures(object = screp.aa), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+screp.aa <- RunPCA(object = screp.aa,
+                features =  VariableFeatures(object = screp.aa),
+                dims = 1:50)
+gc()
+ElbowPlot(screp.aa,ndims = 50)
+screp.aa <- RunHarmony(object = screp.aa, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+screp.aa <- RunUMAP(screp.aa,dims = 1:20,reduction = "harmony")
+screp.aa <- RunTSNE(screp.aa,dims = 1:20,reduction = "harmony")
+
+screp.aa <- FindNeighbors(screp.aa, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1.0, 0.1))  {   
+  screp.aa <- FindClusters(object = screp.aa, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+VariableFeatures(screp.aa)
+```
+
+```{r}
+VlnPlot(screp.aa,features = "percent.ribo",group.by = "annotation_final")
+VlnPlot(screp.aa,features = "Rpl32",group.by = "annotation_final")
+```
+
+
+```{r}
+DimPlot(screp.aa,group.by = "RNA_snn_res.0.9",label = T)
+DimPlot(screp.aa,group.by = "annotation_final",label = T,label.size = 3,label.box = T)
+```
+
+
+```{r}
+save(screp.aa,file = paste0(RDSdir,"lymphoid_convT_V3p3_merged_scRep_aa.Robj"))
+```
+
+```{r}
+screp.aa@meta.data %>% group_by(RNA_snn_res.0.9) %>% summarise(n = n()) %>% ungroup() %>% mutate(prop = n*100/sum(n))
+```
+
+
+```{r}
+Idents(screp.aa) <- "RNA_snn_res.0.8"
+FeaturePlot(screp.aa,features = c("Mki67"),label = T)
+FeaturePlot(screp.aa,features = c("Tox"),label = T)
+FeaturePlot(screp.aa,features = c("Gzmk"),label = T)
+FeaturePlot(screp.aa,features = c("Ccr7"),label = T)
+FeaturePlot(screp.aa,features = c("Tcf7"),label = T)
+FeaturePlot(screp.aa,features = c("Cd3e"),label = T)
+FeaturePlot(screp.aa,features = c("Cd8a"),label = T)
+FeaturePlot(screp.aa,features = c("Cd4"),label = T)
+FeaturePlot(screp.aa,features = c("Klrb1c"),label = T)
+FeaturePlot(screp.aa,features = c("Bcl3"),label = T)
+FeaturePlot(screp.aa,features = c("Cd69"),label = T)
+FeaturePlot(screp.aa,features = c("Entpd1"),label = T)
+```
+
+## prepare for SCN objects
+
+
+```{r}
+colnames(screp.aa@meta.data)
+```
+```{r}
+screp.aa@meta.data$cloneType[screp.aa@meta.data$cloneType] <- as.character("NaN")
+```
+```{r}
+head(screp.aa@meta.data)
+```
+```{r}
+screp.aa$cloneType <- NULL
+screp.aa$highlight <- NULL
+screp.aa$group <- NULL
+screp.aa$clonalProportion <- NULL
+screp.aa$clonalFrequency <- NULL
+screp.aa$cloneSize <- NULL
+```
+
+
+```{r}
+DimPlot(screp.aa,group.by = "annotation_final",label = T,label.size = 3,label.box = T)
+```
+
+```{r}
+save(screp.aa,file = paste0(RDSdir,"lymphoid_convT_V3p3_merged_scRep_scn.Robj"))
+```
+

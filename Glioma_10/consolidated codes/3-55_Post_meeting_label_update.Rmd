@@ -1,0 +1,1623 @@
+---
+title: "3-55_Post_meeting_label_update"
+output: html_document
+date: "2024-06-17"
+---
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(harmony)
+```
+
+```{r}
+library(RColorBrewer)
+
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"))
+```
+
+
+
+# update established subset labels
+## update neuronal-glial
+
+```{r}
+load("data/GBM_RNA_10_resident_V2p2_alt.Robj")
+```
+
+```{r}
+table(resident$annotation_V1)
+```
+
+```{r}
+DimPlot(resident,group.by = "RNA_snn_res.0.2",label = T)
+DimPlot(resident,group.by = "annotation_V1",label = T)
+```
+```{r}
+Idents(resident) <- resident$RNA_snn_res.0.2
+DotPlot(resident,features = c("Aqp4","Aldh1l1","Aldoc","Fezf2", "Rorb", "Dbx2","Lhx2","Sox9","Sox10","Olig2","Mag","Pdgfra","Gad2","Bcl11b","Ppp1r1b","Otx2","Pvalb","Sox2","Nes","Foxp2","Igfbp7","Pecam1","Mki67","P2ry12","Ptprc"),cluster.idents = T) + RotatedAxis()
+```
+Astrocyte: 1,6,15,5,12,7
+Progenitor: 11
+Oligodendrocyte: 4,0,13
+Neuron: 2,9,3,10; 9 : proliferating neuron
+8,14: progenitor-like
+
+record as annotation V2
+
+
+```{r}
+resident@meta.data <- resident@meta.data %>% 
+  mutate(annotation_V2 = case_match(
+    as.character(RNA_snn_res.0.2),
+    "0" ~ "Oligodendrocyte_1",
+    "1" ~ "Astrocyte_1",
+    "2" ~ "Neuron_1",
+    "3" ~ "Neuron_2",
+    "4" ~ "Oligodendrocyte_2",
+    "5" ~ "Astrocyte_2",
+    "6" ~ "Astrocyte_3",
+    "7" ~ "Astrocyte_4",
+    "8" ~ "Progenitor-like_1",
+    "9" ~ "Proliferating_neuron",
+    "10" ~ "Neuron_3",
+    "11" ~ "Progenitor-like_2",
+    "12" ~ "Astrocyte_5",
+    "13" ~ "Oligodendrocyte_3",
+    "14" ~ "Progenitor-like_3",
+    "15" ~ "Astrocyte_6"
+  ),
+  cell_type_V2 = case_match(
+    annotation_V2,
+    "Oligodendrocyte_1" ~ "Oligodendrocyte",
+    "Astrocyte_1" ~ "Astrocyte",
+    "Neuron_1" ~ "Neuron",
+    "Neuron_2" ~ "Neuron",
+    "Oligodendrocyte_2" ~ "Oligodendrocyte",
+    "Astrocyte_2" ~ "Astrocyte",
+    "Astrocyte_3" ~ "Astrocyte",
+    "Astrocyte_4" ~ "Astrocyte",
+    "Progenitor-like_1" ~ "Progenitor-like",
+    "Proliferating neuron" ~ "Neuron",
+    "Neuron_3" ~ "Neuron",
+    "Progenitor-like_2" ~ "Progenitor-like",
+    "Astrocyte_5" ~ "Astrocyte",
+    "Oligodendrocyte_3" ~ "Oligodendrocyte",
+    "Progenitor-like_3" ~ "Progenitor-like",
+    "Astrocyte_6" ~ "Astrocyte",
+    "Proliferating_neuron" ~ "Neuron"
+  ),
+  cell_type = case_match(
+    annotation_V1,
+    "Oligodendrocyte_1" ~ "Oligodendrocyte",
+    "Astrocyte_1" ~ "Astrocyte",
+    "Neuron_1" ~ "Neuron",
+    "Neuron_2" ~ "Neuron",
+    "Oligodendrocyte_2" ~ "Oligodendrocyte",
+    "Astrocyte_2" ~ "Astrocyte",
+    "Astrocyte_3" ~ "Astrocyte",
+    "Progenitor-like_1" ~ "Progenitor-like",
+    "Neuron_3" ~ "Neuron",
+    "Progenitor-like_2" ~ "Progenitor-like",
+    "Astrocyte_4" ~ "Astrocyte",
+    "Progenitor-like_3" ~ "Progenitor-like",
+    "Astrocyte_5" ~ "Astrocyte",
+    .default = annotation_V1
+  ),
+  annotation_V1 = case_match(
+    annotation_V1,
+    "Neutron_1" ~ "Neuron_1",
+    "Neutron_2" ~ "Neuron_2",
+    .default = annotation_V1
+  ),
+  compartment = rep("Neuronal-Glial",nrow(resident@meta.data)))
+```
+
+```{r}
+table(resident$annotation_V2)
+```
+
+
+```{r}
+save(resident,file = "data/GBM_RNA_10_resident_V2p2_alt.Robj")
+```
+
+## update myeloid
+
+change DC-like to migDC
+
+```{r}
+load("data/GBM_RNA_10_myeloid_V3p2_alt.Robj")
+```
+
+```{r}
+table(myeloid$annotation_V1)
+```
+
+```{r}
+Idents(myeloid) <- "annotation_V1"
+FeaturePlot(myeloid,features = "Ccr7",label = T)
+```
+```{r}
+myeloid@meta.data <- myeloid@meta.data %>% 
+  mutate(
+  annotation_V2 = case_match(
+    annotation_V1,
+    "DC-like" ~ "migDC",
+    .default = annotation_V1
+    ))
+```
+
+```{r}
+DimPlot(myeloid,group.by = "annotation_V1")
+DimPlot(myeloid,group.by = "annotation_V2")
+```
+```{r}
+save(myeloid,file = "data/GBM_RNA_10_myeloid_V3p2_alt.Robj")
+```
+
+## check stromal
+
+```{r}
+load("data/GBM_RNA_10_vascular_V2p1_alt.Robj")
+```
+
+```{r}
+FeaturePlot(vascular,features = "Lrrc15")
+```
+
+```{r}
+table(vascular$annotation_V1)
+table(vascular$cell_type)
+```
+
+```{r}
+vascular@meta.data <- vascular@meta.data %>%
+  mutate(cell_type = case_match(
+    cell_type,
+    "endothelial" ~ "Endothelial",
+    "perivascular" ~ "Perivascular",
+    .default = cell_type
+  ),
+  compartment = rep("Vascular-Stromal",nrow(vascular@meta.data)))
+```
+
+```{r}
+table(vascular$cell_type)
+table(vascular$annotation_V1)
+table(vascular$compartment)
+```
+
+
+```{r}
+vascular$annotation_V2 <- vascular$annotation_V1
+vascular$cell_type_V2 <- vascular$cell_type
+```
+
+
+
+```{r}
+save(vascular,file = "data/GBM_RNA_10_vascular_V2p1_alt.Robj")
+```
+
+## update Glioma
+
+### update subset
+also perform Monocle
+
+```{r}
+load("data/GBM_RNA_10_glioma_V2_alt.Robj")
+```
+
+
+```{r}
+DimPlot(Glioma, group.by = "annotation_V1")
+```
+
+```{r}
+Glioma <- subset(Glioma,subset = annotation_V1 != "likely-not-tumor")
+```
+
+```{r}
+DimPlot(Glioma, group.by = "annotation_V1",split.by = "progress")
+```
+
+```{r}
+colnames(Glioma@meta.data)
+```
+```{r}
+FeaturePlot(Glioma,features = "Sox10")
+FeaturePlot(Glioma,features = "Cspg4")
+```
+
+```{r}
+library(monocle3)
+library(SeuratWrappers)
+```
+
+```{r}
+cds <- as.cell_data_set(Glioma)
+cds <- cluster_cells(cds, resolution=1e-3)
+```
+
+```{r}
+plot_cells(cds, color_cells_by = "cluster", show_trajectory_graph = FALSE)
+plot_cells(cds, color_cells_by = "partition", show_trajectory_graph = FALSE)
+```
+```{r}
+cds <- learn_graph(cds, use_partition = T, verbose = FALSE)
+```
+```{r}
+plot_cells(cds,
+           color_cells_by = "cluster",
+           label_groups_by_cluster=T,
+           label_leaves=T,
+           label_branch_points=T)
+```
+
+
+
+```{r}
+cds <- order_cells(cds, root_cells = colnames(cds[,clusters(cds) == 3]))
+plot_cells(cds,
+           color_cells_by = "pseudotime",
+           group_cells_by = "cluster",
+           label_cell_groups = FALSE,
+           label_groups_by_cluster=FALSE,
+           label_leaves=F,
+           label_branch_points=F,
+           label_roots = T,
+           trajectory_graph_color = "white")+theme_dark()
+```
+
+```{r}
+Glioma <- AddMetaData(Glioma,metadata = cds@principal_graph_aux@listData$UMAP$pseudotime,col.name = "monocle3_trajectory")
+Glioma <- AddMetaData(Glioma,metadata = cds@clusters@listData[["UMAP"]][["clusters"]],col.name = "monocle3_cluster")
+
+```
+
+```{r}
+FeaturePlot(Glioma, features = "monocle3_trajectory")
+```
+
+```{r}
+DimPlot(Glioma,group.by = "monocle3_cluster",split.by = "progress")
+```
+
+
+```{r}
+save(Glioma,file = "data/GBM_RNA_10_glioma_V3_alt.Robj")
+```
+
+## try isolate the potentially mislabeled population?
+
+### try co-clustering with OLG and tumors
+
+
+```{r}
+table(resident$cell_type)
+```
+
+```{r}
+OLG_Prog <- subset(resident,subset = (cell_type == "Oligodendrocyte") | (cell_type == "Progenitor-like"))
+```
+
+```{r}
+combined <- merge(Glioma,OLG_Prog)
+```
+
+```{r}
+combined <- NormalizeData(combined,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+combined <- FindVariableFeatures(object = combined, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+#VariableFeatures(vascular) <-  VariableFeatures(vascular) [!grepl("^Tra|^Trab|^Igh|^Igk|Mamu-a", VariableFeatures(vascular))]
+VariableFeaturePlot(combined,selection.method = "mean.var.plot")
+
+combined <- ScaleData(object = combined, features = VariableFeatures(object = combined), vars.to.regress = c("nCount_RNA", "percent.mt"))
+combined <- RunPCA(object = combined,
+                features =  VariableFeatures(object = combined),
+                dims = 1:50)
+gc()
+
+ElbowPlot(combined,ndims = 50)
+```
+
+```{r}
+combined <- RunHarmony(object = combined, group.by.vars = c("batch_ID"), max.iter.harmony = 20)
+combined <- RunUMAP(combined,dims = 1:30,reduction = "harmony")
+combined <- RunTSNE(combined,dims = 1:30,reduction = "harmony")
+
+combined <- FindNeighbors(combined, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  combined <- FindClusters(object = combined, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DimPlot(combined,group.by = "annotation_V1",split.by = "progress")
+DimPlot(combined,group.by = "annotation_V1",label = T,label.size = 2)
+DimPlot(combined,group.by = "compartment")
+DimPlot(combined,group.by = "RNA_snn_res.0.1")
+```
+```{r}
+save(combined,file = "data/GBM_RNA_10_glioma_V3_OLG_prog_V2_combined_alt.Robj")
+```
+
+```{r}
+Idents(combined) <- "RNA_snn_res.0.1"
+FeaturePlot(combined,features = c("Vtn"),label = T)
+FeaturePlot(combined,features = c("Olig2"),label = T)
+FeaturePlot(combined,features = c("Col1a1"),label = T)
+FeaturePlot(combined,features = c("Sox9"),label = T)
+FeaturePlot(combined,features = c("Sox10"),label = T)
+FeaturePlot(combined,features = c("Mag"),label = T)
+FeaturePlot(combined,features = c("Pdgfra"),label = T)
+FeaturePlot(combined,features = c("Pdgfrb"),label = T)
+FeaturePlot(combined,features = c("Lrrc15"),label = T)
+```
+
+```{r}
+DotPlot(combined,features = c("Olig2","Mag","Sox9","Sox10","Pdgfra","Nfib","Sox2","Nes","Foxp2","Igfbp7","Pecam1","Myct1","Col1a1","Col5a2","Dlc1","Pdgfrb","Vtn","Anpep","Acta2","Fos","Bphl","Ttr","Cd63","Mki67"),cluster.idents = T)+RotatedAxis()
+```
+
+Cluster 4 is a fibroblast cluster
+
+## reload V2 Glioma and re-label Erythrocytes
+
+```{r}
+load("data/GBM_RNA_10_glioma_V2_alt.Robj")
+```
+
+```{r}
+DimPlot(Glioma, group.by = "annotation_V1")
+```
+
+```{r}
+Glioma@meta.data <- Glioma@meta.data %>%
+  mutate(annotation_V2 = case_match(
+    as.character(annotation_V1),
+    "likely-not-tumor" ~ "Erythrocyte-like-multiplet",
+    .default = annotation_V1
+  ),
+  cell_type_V2 = case_match(
+    annotation_V2,
+    "Erythrocyte-like-multiplet" ~ "noise",
+    .default = cell_type
+  ),
+  compartment = case_match(
+    annotation_V2,
+    "Erythrocyte-like-multiplet" ~ "noise",
+    .default = compartment
+  ))
+```
+
+```{r}
+DimPlot(Glioma, group.by = "annotation_V2")
+DimPlot(Glioma, group.by = "cell_type_V2")
+DimPlot(Glioma, group.by = "compartment")
+```
+```{r}
+FeaturePlot(Glioma, features = "Olig2")
+FeaturePlot(Glioma, features = "Pdgfra")
+```
+```{r}
+save(Glioma,file = "data/GBM_RNA_10_glioma_V2_alt.Robj")
+```
+
+# merge brain cells for label creation
+
+```{r}
+brain <- merge(resident,vascular)
+```
+
+```{r}
+brain <- NormalizeData(brain,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+brain <- FindVariableFeatures(object = brain, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+#VariableFeatures(vascular) <-  VariableFeatures(vascular) [!grepl("^Tra|^Trab|^Igh|^Igk|Mamu-a", VariableFeatures(vascular))]
+VariableFeaturePlot(brain,selection.method = "mean.var.plot")
+
+brain <- ScaleData(object = brain, features = VariableFeatures(object = brain), vars.to.regress = c("nCount_RNA", "percent.mt"))
+brain <- RunPCA(object = brain,
+                features =  VariableFeatures(object = brain),
+                dims = 1:50)
+gc()
+
+ElbowPlot(brain,ndims = 50)
+```
+
+```{r}
+brain <- RunHarmony(object = brain, group.by.vars = c("batch_ID"), max.iter.harmony = 20)
+brain <- RunUMAP(brain,dims = 1:30,reduction = "harmony")
+brain <- RunTSNE(brain,dims = 1:30,reduction = "harmony")
+
+brain <- FindNeighbors(brain, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  brain <- FindClusters(object = brain, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+brain <- JoinLayers(brain)
+```
+
+```{r}
+library(RColorBrewer)
+
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"))
+```
+
+
+
+```{r}
+DimPlot(brain, group.by = "annotation_V1")+scale_color_manual(values = pal)
+DimPlot(brain, group.by = "cell_type")
+DimPlot(brain, group.by = "compartment")
+DimPlot(brain, group.by = "annotation_V2")+scale_color_manual(values = c(pal,"red3"))
+DimPlot(brain, group.by = "cell_type_V2")
+
+```
+
+
+```{r}
+DimPlot(brain,group.by = "RNA_snn_res.0.1",label = T)
+```
+
+
+```{r}
+DimPlot(brain, group.by = "annotation_V2")+scale_color_manual(values = c(pal,"red3"))
+DimPlot(brain, group.by = "cell_type_V2")
+```
+## Now update labels from progenitor-like 1 and 3; remove peri_5
+
+```{r}
+brain@meta.data <- brain@meta.data %>%
+  mutate(annotation_V2 = case_match(
+    annotation_V1,
+    "Perivascular_5" ~ "stromal_multiplet",
+    "Progenitor-like_1" ~ "Mislabeled_Fib_1",
+    "Progenitor-like_3" ~ "Mislabeled_Fib_2",
+    .default = annotation_V2
+  ),
+    cell_type_V2 = case_match(
+    annotation_V1,
+    "Perivascular_5" ~ "noise",
+    "Progenitor-like_1" ~ "Perivascular",
+    "Progenitor-like_3" ~ "Perivascular",
+    .default = cell_type_V2
+  ),
+  compartment = case_match(
+    annotation_V1,
+    "Perivascular_5" ~ "noise",
+    "Progenitor-like_1" ~ "Vascular-Stromal",
+    "Progenitor-like_3" ~ "Vascular-Stromal",
+    .default = compartment
+  ))
+```
+
+
+```{r}
+DimPlot(brain, group.by = "compartment")
+DimPlot(brain, group.by = "annotation_V2")+scale_color_manual(values = c(pal,"red3"))
+DimPlot(brain, group.by = "cell_type_V2")
+```
+```{r}
+save(brain, file = "data/GBM_RNA_10_resident_V2_vascular_V2_combined_alt.Robj")
+```
+
+```{r}
+table(brain$compartment)
+```
+
+```{r}
+vascular <- subset(brain,subset = compartment == "Vascular-Stromal")
+resident <- subset(brain,subset = compartment == "Neuronal-Glial")
+```
+
+```{r}
+save(vascular, file = "GBM_RNA_10_vascular_V3_alt.Robj")
+save(resident, file = "GBM_RNA_10_resident_V3_alt.Robj")
+```
+
+# re-process NG and VS subsets
+## neuronal-glial
+
+```{r}
+resident@assays[["RNA"]]@layers[["scale.data.1.1"]] <- NULL
+resident@assays[["RNA"]]@layers[["scale.data.2.1"]] <- NULL
+```
+
+
+```{r}
+resident <- NormalizeData(resident,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+resident <- FindVariableFeatures(object = resident, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+#VariableFeatures(vascular) <-  VariableFeatures(vascular) [!grepl("^Tra|^Trab|^Igh|^Igk|Mamu-a", VariableFeatures(vascular))]
+VariableFeaturePlot(resident,selection.method = "mean.var.plot")
+
+resident <- ScaleData(object = resident, features = VariableFeatures(object = resident), vars.to.regress = c("nCount_RNA", "percent.mt"))
+resident <- RunPCA(object = resident,
+                features =  VariableFeatures(object = resident),
+                dims = 1:50)
+gc()
+
+ElbowPlot(resident,ndims = 50)
+```
+
+
+```{r}
+resident <- RunHarmony(object = resident, group.by.vars = c("batch_ID"), max.iter.harmony = 20)
+resident <- RunUMAP(resident,dims = 1:30,reduction = "harmony")
+resident <- RunTSNE(resident,dims = 1:30,reduction = "harmony")
+
+resident <- FindNeighbors(resident, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  resident <- FindClusters(object = resident, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DimPlot(resident,group.by = "RNA_snn_res.0.2",label = T)
+DimPlot(resident,group.by = "RNA_snn_res.0.2",split.by = "progress")
+DimPlot(resident,group.by = "RNA_snn_res.0.2",split.by = "batch_ID")
+```
+```{r}
+DimPlot(resident,group.by = "annotation_V1",label = T)
+DimPlot(resident,group.by = "cell_type_V2")
+DimPlot(resident,group.by = "compartment")
+```
+
+
+```{r}
+# general panel
+Idents(resident) <- resident$RNA_snn_res.0.2
+DotPlot(resident,features = c("Egfr","Ascl1","Aqp4","Aldh1l1","Aldoc","Fezf2", "Rorb", "Dbx2","Lhx2","Zbtb20","Nfib","Foxj1","Tmem212","Ak7","Mia","Tagln","Tpm1","Ly6c1","Sox9","Sox10","Olig2","Mag","Pdgfra","Cspg4","Gad2","Bcl11b","Ppp1r1b","Otx2","Pvalb","Sox2","Nes","Foxp2","Igfbp7","Flt1","Pecam1","Col1a1","Mki67","P2ry12","Ptprc"),cluster.idents = T) + theme(axis.text.x = element_text(size = 8))+ RotatedAxis()
+```
+
+
+```{r}
+# neuron panel 1
+DotPlot(resident,features = c("Aqp4","Sox9","Sox10","Olig2","Mag","Pdgfra","Slc17a6","Slc17a7","Slc32a1","Aldh1a1","Gad2","Slc6a5","Hdc","Bcl11b","Ppp1r1b","Otx2","Pvalb","Nes","Foxp2","Igfbp7","Igfbp4","Mki67"),cluster.idents = T) + RotatedAxis()
+```
+
+```{r}
+# neuron panel 2
+# Bcl11b is excitory marker
+
+DotPlot(resident,features = c("Reln","Trp73","Lhx1","Lhx5","Neurod1","Slc17a6","Slc17a7","Slc32a1","Aldh1a1","Gad2","Slc6a5","Hdc","Neurod6","Bcl11b","Calb2","Ppp1r1b","Otx2","Pvalb","Nes","Foxp2","Igfbp7","Igfbp4","Mki67"),cluster.idents = T) + RotatedAxis()
+```
+
+
+```{r}
+FeaturePlot(resident,features = "Mki67",label = T)
+FeaturePlot(resident,features = "Aqp4",label = T)
+FeaturePlot(resident,features = "Pdgfra",label = T)
+FeaturePlot(resident,features = "Sox9",label = T)
+FeaturePlot(resident,features = "Sox10",label = T)
+FeaturePlot(resident,features = "Sox2",label = T)
+FeaturePlot(resident,features = "Hopx",label = T)
+FeaturePlot(resident,features = "Olig1",label = T)
+FeaturePlot(resident,features = "Nfib",label = T)
+FeaturePlot(resident,features = "Zbtb20",label = T)
+FeaturePlot(resident,features = "Nes",label = T)
+FeaturePlot(resident,features = "Moxd1",label = T)
+FeaturePlot(resident,features = "Ptprz1",label = T)
+```
+
+OLG: 0,4,13 (Olig1,Olig2, Mag), 4 may be less mature; 
+Glial-progenitor-like: 9,11 (Pdgfra+ Sox9+ Sox10+; Egfr+Ascl1+);
+Unknown_Igfbp7_high: 2
+Astrocytes: 1,5,7,8,12,14,15;
+Ependymal cells: 6,16 (Foxj1+ Sox9+ Sox2+ Nes+ Tmem212); 
+Neurons: 3,10
+
+
+```{r}
+# not yet run as of June 19 2024; plan to annotate on June 20
+# annotation performed on June 20
+resident@meta.data <- resident@meta.data %>% 
+  mutate(annotation_V2 = case_match(
+    as.character(RNA_snn_res.0.2),
+    "0" ~ "Oligodendrocyte_1",
+    "1" ~ "Astrocyte_1",
+    "2" ~ "Unknown_Igfbp7_high",
+    "3" ~ "Neuron_1",
+    "4" ~ "Oligodendrocyte_2",
+    "5" ~ "Astrocyte_2",
+    "6" ~ "Ependymal_1",
+    "7" ~ "Astrocyte_3", # Progenitor-like_1
+    "8" ~ "Astrocyte_4",
+    "9" ~ "Progenitor-like_1",
+    "10" ~ "Neuron_2",
+    "11" ~ "Progenitor-like_2",
+    "12" ~ "Astrocyte_5",
+    "13" ~ "Oligodendrocyte_3",
+    "14" ~ "Astrocyte_6",
+    "15" ~ "Astrocyte_7",
+    "16" ~ "Ependymal_2"
+  ),
+  cell_type_V2 = case_match(
+    as.character(RNA_snn_res.0.2),
+    "0" ~ "Oligodendrocyte",
+    "1" ~ "Astrocyte",
+    "2" ~ "Unknown",
+    "3" ~ "Neuron",
+    "4" ~ "Oligodendrocyte",
+    "5" ~ "Astrocyte",
+    "6" ~ "Ependymal",
+    "7" ~ "Astrocyte", # Progenitor-like_1
+    "8" ~ "Astrocyte",
+    "9" ~ "Progenitor-like",
+    "10" ~ "Neuron",
+    "11" ~ "Progenitor-like",
+    "12" ~ "Astrocyte",
+    "13" ~ "Oligodendrocyte",
+    "14" ~ "Astrocyte",
+    "15" ~ "Astrocyte",
+    "16" ~ "Ependymal"
+  ))
+```
+
+```{r}
+resident <- JoinLayers(resident)
+```
+
+```{r}
+save(resident,file = "data/GBM_RNA_10_resident_V3_alt.Robj")
+```
+
+## vascular-stromal
+
+```{r}
+vascular <- NormalizeData(vascular,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+vascular <- FindVariableFeatures(object = vascular, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+#VariableFeatures(vascular) <-  VariableFeatures(vascular) [!grepl("^Tra|^Trab|^Igh|^Igk|Mamu-a", VariableFeatures(vascular))]
+VariableFeaturePlot(vascular,selection.method = "mean.var.plot")
+
+vascular <- ScaleData(object = vascular, features = VariableFeatures(object = vascular), vars.to.regress = c("nCount_RNA", "percent.mt"))
+vascular <- RunPCA(object = vascular,
+                features =  VariableFeatures(object = vascular),
+                dims = 1:50)
+gc()
+
+ElbowPlot(vascular,ndims = 50)
+```
+
+```{r}
+vascular <- RunHarmony(object = vascular, group.by.vars = c("batch_ID"), max.iter.harmony = 20)
+vascular <- RunUMAP(vascular,dims = 1:20,reduction = "harmony")
+vascular <- RunTSNE(vascular,dims = 1:20,reduction = "harmony")
+
+vascular <- FindNeighbors(vascular, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  vascular <- FindClusters(object = vascular, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+
+```{r}
+DimPlot(vascular,group.by = "RNA_snn_res.0.2",split.by = "progress",label = T)
+DimPlot(vascular,group.by = "RNA_snn_res.0.2",label = T)
+DimPlot(vascular,group.by = "RNA_snn_res.0.2",split.by = "batch_ID",label = T)
+```
+```{r}
+DimPlot(vascular,group.by = "RNA_snn_res.0.5",split.by = "progress",label = T)
+DimPlot(vascular,group.by = "RNA_snn_res.0.5",label = T)
+DimPlot(vascular,group.by = "RNA_snn_res.0.5",split.by = "batch_ID",label = T)
+```
+
+
+
+```{r}
+DimPlot(vascular,group.by = "RNA_snn_res.0.1",split.by = "progress")
+DimPlot(vascular,group.by = "RNA_snn_res.0.1")
+DimPlot(vascular,group.by = "RNA_snn_res.0.1",split.by = "batch_ID")
+```
+The resolution is chosen such that subpopulations enriched in one condition can be identified. Meanwhile, cluster number is restricted to avoid too many clusters.
+
+```{r}
+Idents(vascular) <- vascular$RNA_snn_res.0.2
+DotPlot(vascular,features = c("Olig2","Aqp4","Gad1","Gad2","Slc17a7","Rorb","Nfib","Sox2","Nes","Foxp2","Islr","Igfbp7","Pecam1","Myct1","Col1a1","Col5a2","Dlc1","Pdgfra","Pdgfrb","Vtn","Anpep","Acta2","Fos","Bphl","Ttr","Cd63","Mki67"),cluster.idents = T)+RotatedAxis()
+```
+
+```{r}
+DotPlot(vascular,features = c("Pdgfrb","Cspg4","Vtn","Anpep","Rgs5","Acta2","Tagln","Mylk","Myh11","Pecam1","Myct1","Tek","Flt1","Ptprb","Bmx","Efnb2","Vegfc","Vcam1","Nr2f2","Slc16a1","Tfrc","Mfsd2a","Col1a1","Col5a2","Igfbp7","Fn1","Fap","Tnc","Pdpn","Vim","S100a4","Mmp2","Dcn","Islr","Pdgfra","Nes","Foxp2","Olig2","Aqp4","Gad1","Gad2","Slc17a7","Rorb","Nfib"),dot.scale = 4,scale.by = "radius",cluster.idents = T,group.by = "RNA_snn_res.0.2")+theme(axis.text.x = element_text(size = 8))+RotatedAxis()
+```
+
+
+
+```{r}
+DotPlot(vascular,features = c("Pdgfrb","Cspg4","Vtn","Anpep","Rgs5","Acta2","Tagln","Mylk","Myh11","Pecam1","Myct1","Tek","Flt1","Ptprb","Bmx","Efnb2","Vegfc","Vcam1","Nr2f2","Slc16a1","Tfrc","Mfsd2a","Col1a1","Col5a2","Mmp2","Dcn","Islr","Pdgfra","Nes","Foxp2","Olig2","Aqp4","Gad1","Gad2","Slc17a7","Rorb","Nfib"),dot.scale = 4,scale.by = "radius",cluster.idents = T,group.by = "RNA_snn_res.0.2")+theme(axis.text.x = element_text(size = 8))+RotatedAxis()
+g <- DotPlot(vascular,features = c("Pdgfrb","Cspg4","Vtn","Anpep","Rgs5","Acta2","Tagln","Mylk","Myh11","Pecam1","Myct1","Tek","Flt1","Ptprb","Bmx","Efnb2","Vegfc","Vcam1","Nr2f2","Slc16a1","Tfrc","Mfsd2a","Col1a1","Col5a2","Mmp2","Dcn","Islr","Pdgfra","Mki67","Sox2","Nes","Foxp2","Olig2","Aqp4","Gad1","Gad2","Slc17a7","Rorb","Nfib"),cluster.idents = T,group.by = "RNA_snn_res.0.2")+theme(axis.text.x = element_text(size = 8))+RotatedAxis()
+ggsave(filename = "Vascular-Stromal_V3_annotation_dotplot2_res02.pdf",plot = g, width = 15, height = 10)
+```
+
+```{r}
+Idents(vascular) <- vascular$RNA_snn_res.0.2
+
+FeaturePlot(vascular,features = "Ptprb",label = T)
+FeaturePlot(vascular,features = "Col5a2",label = T)
+FeaturePlot(vascular,features = "Dcn",label = T)
+FeaturePlot(vascular,features = "Col1a2",label = T)
+FeaturePlot(vascular,features = "Mki67",label = T)
+FeaturePlot(vascular,features = "Vegfc",label = T)
+FeaturePlot(vascular,features = "Nr2f2",label = T)
+FeaturePlot(vascular,features = "Tfrc",label = T)
+FeaturePlot(vascular,features = "Cspg4",label = T)
+FeaturePlot(vascular,features = "Vtn",label = T)
+FeaturePlot(vascular,features = "Foxp2",label = T)
+FeaturePlot(vascular,features = "Col5a2",label = T)
+FeaturePlot(vascular,features = "Fap",label = T)
+FeaturePlot(vascular,features = "Il6",label = T)
+```
+
+8: SMA
+
+2,4,6: Fibroblast; 
+6: perivascular fibroblast/CAF
+
+1: pericytes
+
+0: capillary EC
+3: arteriole EC
+5: capillary EC
+7: capillary EC
+
+
+
+```{r}
+vascular@meta.data <- vascular@meta.data %>% 
+  mutate(annotation_V2 = case_match(
+    as.character(RNA_snn_res.0.2),
+    "0" ~ "Capillary_EC_1",
+    "1" ~ "Pericytes",
+    "2" ~ "Fibroblast_1",
+    "3" ~ "Arteriole_EC",
+    "4" ~ "Fibroblast_2",
+    "5" ~ "Capillary_EC_2",
+    "6" ~ "Fibroblast_3_CAF",
+    "7" ~ "Capillary_EC_3",
+    "8" ~ "Smooth_muscle"
+  ),
+  cell_type_V2 = case_match(
+    as.character(RNA_snn_res.0.2),
+    "0" ~ "Endothelial",
+    "1" ~ "Perivascular",
+    "2" ~ "Fibroblast",
+    "3" ~ "Perivascular",
+    "4" ~ "Fibroblast",
+    "5" ~ "Endothelial",
+    "6" ~ "Fibroblast",
+    "7" ~ "Endothelial",
+    "8" ~ "Perivascular"
+  ))
+```
+
+
+```{r}
+vascular <- JoinLayers(vascular)
+```
+
+
+```{r}
+save(vascular,file = "data/GBM_RNA_10_vascular_V3_alt.Robj")
+```
+
+# update immune cell labels (adding functional labels)
+
+## starting from lymphocytes
+
+```{r}
+load("data/GBM_RNA_10_lymphoid_V3p1_alt.Robj")
+```
+
+
+```{r}
+lymphoid <- NormalizeData(lymphoid,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+lymphoid <- FindVariableFeatures(object = lymphoid, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+# TCR gene removal step missing
+VariableFeaturePlot(lymphoid,selection.method = "mean.var.plot")
+VariableFeatures(lymphoid) <-  VariableFeatures(lymphoid) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(lymphoid))]
+lymphoid <- ScaleData(object = lymphoid, features = VariableFeatures(object = lymphoid), vars.to.regress = c("nCount_RNA", "percent.mt"))
+lymphoid <- RunPCA(object = lymphoid,
+                features =  VariableFeatures(object = lymphoid),
+                dims = 1:40)
+gc()
+
+ElbowPlot(lymphoid,ndims = 40)
+```
+
+```{r}
+lymphoid <- RunHarmony(object = lymphoid, group.by.vars = c("batch_ID"), max.iter.harmony = 20)
+lymphoid <- RunUMAP(lymphoid,dims = 1:20,reduction = "harmony")
+lymphoid <- RunTSNE(lymphoid,dims = 1:20,reduction = "harmony")
+
+lymphoid <- FindNeighbors(lymphoid, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  lymphoid <- FindClusters(object = lymphoid, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+lymphoid <- JoinLayers(lymphoid)
+```
+
+```{r}
+DimPlot(lymphoid,group.by = "annotation_V1")
+DimPlot(lymphoid,group.by = "RNA_snn_res.0.8",label = T)
+```
+
+```{r}
+DotPlot(lymphoid,group.by = "RNA_snn_res.0.8",features = c("Cd3e","Cd4","Cd8a","Ccr7","Lef1","Cd44","Sell","Prf1","Cx3cr1","Isg15","Cd40lg","Icos","Il2ra","Il2rb","Il7r","Tnf","Ifng","Gzmb","Lag3","Havcr2","Tox","Tigit","Pdcd1","Ncr1","Klrb1c","Tyrobp","Foxp3","Batf3","Irf4","Il17a","Gata3","Rorc","Cd163l1","Tcrg-C1","Gzmk","Gzma","Ms4a1","Cd19","Cr2","Fcer2a","Cd24a","Cd1d1","Pou2af1","Mki67"),dot.scale = 5) + RotatedAxis()+theme(axis.text=element_text(size=8),
+        axis.title=element_text(size=8,face="bold"),
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8))
+```
+
+```{r}
+Idents(lymphoid) <- "RNA_snn_res.0.8"
+FeaturePlot(lymphoid,features = "Cd3e",label = T)
+FeaturePlot(lymphoid,features = "Cd4",label = T)
+FeaturePlot(lymphoid,features = "Cd8a",label = T)
+FeaturePlot(lymphoid,features = "Tox",label = T)
+FeaturePlot(lymphoid,features = "Tigit",label = T)
+FeaturePlot(lymphoid,features = "Lag3",label = T)
+```
+
+
+Cd19+ memory B cells: 6,10, 11
+
+NK: 4 (Cd3- Cd4- Cd8- Gzma+)
+NKT: 3 (Cd3+ Ncr1+ Klrb1c+)
+
+0: CD8 T (Cd3e+ Cd8a+); Ccl4+ activated CD8
+1: CD4 T; activated CD4 (Icos+ Cd40lg+)
+
+2: Highly Activated T cells (Pdcd1+Cd44high Il2ra+)
+
+5: Proliferating T cells
+7: Ifn-responsive T cells (Isg15+)
+8: Naive T cells (Ccr7+ Lef1+)
+9: Helper T cell (Foxp3+)
+12: gdT cells (Cd163l1+ Cd4- Cd8a-)
+13: Sox2+ T cells; possibly multiplets
+
+```{r}
+table(lymphoid$RNA_snn_res.0.8)
+```
+
+
+```{r}
+Idents(lymphoid) <- "annotation_V1"
+FeaturePlot(lymphoid,features = c("Havcr2"),label = T,label.size = 2)
+FeaturePlot(lymphoid,features = c("Lag3"),label = T,label.size = 2)
+FeaturePlot(lymphoid,features = c("Cd19"),label = T,label.size = 2)
+FeaturePlot(lymphoid,features = c("Cd4"),label = T,label.size = 2)
+FeaturePlot(lymphoid,features = c("Cd8a"),label = T,label.size = 2)
+```
+
+```{r}
+lymphoid@meta.data <- lymphoid@meta.data %>%
+  mutate(annotation_V2 = case_match(
+    as.character(RNA_snn_res.0.8),
+    "0" ~ "0_activated_CD8",
+    "1" ~ "1_activated_CD4",
+    "2" ~ "Pdcd1_Cd44_high_activated_T",
+    "3" ~ "NKT",
+    "4" ~ "NK",
+    "5" ~ "Proliferating_T_cells",
+    "6" ~ "Memory_B_1",
+    "7" ~ "Ifn-responsive_T_cells",
+    "8" ~ "Naive_T_cells",
+    "9" ~ "Treg",
+    "10" ~ "Memory_B_2",
+    "11" ~ "Memory_B_3",
+    "12" ~ "gdT_cells",
+    "13" ~ "multiplets-like"
+  ),
+  annotation_main = case_match(
+    as.character(RNA_snn_res.0.8),
+    "0" ~ "CD8_T_cells",
+    "1" ~ "CD4_T_cells",
+    "2" ~ "T_cells",
+    "3" ~ "NKT",
+    "4" ~ "NK",
+    "5" ~ "T_cells",
+    "6" ~ "B_cells",
+    "7" ~ "T_cells",
+    "8" ~ "T_cells",
+    "9" ~ "CD4_T_cells",
+    "10" ~ "B_cells",
+    "11" ~ "B_cells",
+    "12" ~ "gdT_cells",
+    "13" ~ "noise"
+  ),
+  cell_type_V2 = case_match(
+    as.character(RNA_snn_res.0.8),
+    "13"  ~ "noise",
+    .default = "Lymphoid"
+  ))
+```
+
+```{r}
+DimPlot(lymphoid,group.by = "annotation_V2",label = F,split.by = "progress")
+DimPlot(lymphoid,group.by = "annotation_main",label = F,split.by = "progress")
+```
+
+```{r}
+save(lymphoid,file = "data/GBM_RNA_10_lymphoid_V3p1_alt.Robj")
+```
+
+## myeloid
+
+```{r}
+load("data/GBM_RNA_10_myeloid_V3p2_alt.Robj")
+```
+
+```{r}
+DimPlot(myeloid,group.by = "annotation_V2",label = T)
+DimPlot(myeloid,group.by = "annotation_V2",label = F,split.by = "progress")
+```
+
+```{r}
+DimPlot(myeloid,group.by = "RNA_snn_res.0.8",label = T)
+DotPlot(myeloid,features = c("Ptprc","Cd3e","Cd4","Cd8a","Ncr1","Klrb1c","Gzma","Cd19","Cd79a","Tyrobp","Adgre1","Mertk","Cd44","Ccr2","Siglech","Sirpa","Batf3","Xcr1","Flt3","Mpo","S100a8","Cd200r3","Enpp3","Lyz2","Sall1","P2ry12","Hexb","Mki67"),group.by = "RNA_snn_res.0.8",cluster.idents = T)+RotatedAxis()
+```
+```{r}
+Idents(myeloid) <- "RNA_snn_res.0.8"
+FeaturePlot(myeloid,features = "Flt3",label = T)
+FeaturePlot(myeloid,features = "Itgax",label = T)
+FeaturePlot(myeloid,features = "Itgam",label = T)
+FeaturePlot(myeloid,features = "Adgre1",label = T)
+FeaturePlot(myeloid,features = "Cd209a",label = T) # cDC2
+FeaturePlot(myeloid,features = "Ccr2",label = T) # monocytic 
+```
+
+```{r}
+Idents(myeloid) <- "RNA_snn_res.0.8"
+FeaturePlot(myeloid,features = "Ace",label = T)
+FeaturePlot(myeloid,features = "Itgal",label = T)
+FeaturePlot(myeloid,features = "Axl",label = T) # check mono-mac signature; maybe immunosuppressive marker
+FeaturePlot(myeloid,features = "Ly6c2",label = T) # monocyte sig
+```
+```{r}
+# BAM and infiltrated
+FeaturePlot(myeloid,features = "Dab2",label = T) # BAM
+FeaturePlot(myeloid,features = "Ccr2",label = T) # monocyte-sig
+FeaturePlot(myeloid,features = "Mrc1",label = T) # BAM
+FeaturePlot(myeloid,features = "H2-Aa",label = T) # MHCII 
+FeaturePlot(myeloid,features = "Cd74",label = T) # MHCII 
+```
+
+
+```{r}
+# cell-states
+FeaturePlot(myeloid,features = "Il1b",label = T) # inflamasome activation
+FeaturePlot(myeloid,features = "Ccl3",label = T) # activation
+FeaturePlot(myeloid,features = "Ifitm3",label = T) # activation
+FeaturePlot(myeloid,features = "Mif",label = T) # Imm-supp marker; but I prefer not to call them in this way
+FeaturePlot(myeloid,features = "Lgals3",label = T) # imm_supp
+FeaturePlot(myeloid,features = "Pkm",label = T) # imm_supp
+FeaturePlot(myeloid,features = "Id2",label = T) # imm_supp
+FeaturePlot(myeloid,features = "Ccl4",label = T) # imm_supp; really?
+```
+
+c0,1,2,4 are BAM; c2 is hetergeneous, so c2 may be cell-state clustered. 
+
+c0 is BAM with MCHII low signature (AP_low)
+c1 is Vcam1+Igtp+ BAM; complement-active BAM
+c4 (Cd86, Axl low;) bystander
+
+c2 Slamf9 high macrophage;(Ccr5+ Ccnd2+ Klra2+)
+
+c3 is Mertk+ Ccr2+ Adgre1+ Axl+, so c3 may be monocyte-derived macorphage (MdM or intM: intermediate monocyte/macrophages)
+
+c5 is actually partially Flt3+ Adgre1 weak, but Cd209a strong so c5 may be actually cDC2.
+c6 is glioma-associated macrophages (GAM)
+c11 and c12 were previously labeled as mono-mac but are also Adgre1 weak. c12 is Itgal high, Ace+, so it may be non-classical monocytes.c11 is Itgal+ Itgam+ Ccr2+ Ly6c2+, so it may be classical monocytes.
+
+
+```{r}
+myeloid@meta.data <- myeloid@meta.data %>% 
+  mutate(annotation_main = case_match(
+    as.character(RNA_snn_res.0.8),
+    "0" ~ "BAM",
+    "1" ~ "BAM",
+    "2" ~ "Macrophage",
+    "3" ~ "Mono-mac",
+    "4" ~ "BAM",
+    "5" ~ "cDC2",
+    "6" ~ "GAM",
+    "7" ~ "cDC1",
+    "8" ~ "migDC",
+    "9" ~ "Neutrophil",
+    "10" ~ "pDC",
+    "11" ~ "Monocytes",
+    "12" ~ "Monocytes",
+    "13" ~ "Mast cells"
+  ),
+  annotation_V2 = case_match(
+    as.character(RNA_snn_res.0.8),
+    "0" ~ "MHC2_low_BAM",
+    "1" ~ "Complement_GBP_BAM",
+    "2" ~ "Slamf9_macrophage",
+    "3" ~ "intM",
+    "4" ~ "MHC2_high_BAM",
+    "5" ~ "cDC2",
+    "6" ~ "GAM",
+    "7" ~ "cDC1",
+    "8" ~ "migDC",
+    "9" ~ "Neutrophil",
+    "10" ~ "pDC",
+    "11" ~ "Classical_monocytes",
+    "12" ~ "Non-classical_monocytes",
+    "13" ~ "Mast cells"
+    ),
+  cell_type = case_match(
+    as.character(RNA_snn_res.0.8),
+    "1"  ~ "myeloid",
+    .default = "myeloid"
+  ))
+```
+
+```{r}
+DimPlot(myeloid,group.by = "annotation_V2",label = T)
+DimPlot(myeloid,group.by = "annotation_V2",label = F,split.by = "progress")
+DimPlot(myeloid,group.by = "annotation_main",label = T)
+```
+```{r}
+save(myeloid,file = "data/GBM_RNA_10_myeloid_V3p2_alt.Robj")
+```
+
+## microglia
+
+```{r}
+load("data/GBM_RNA_10_microglia_V3_alt.Robj")
+```
+
+```{r}
+DimPlot(microglia,group.by = "annotation_V1",label = T)
+```
+remove microglia_9 which express myeloid genes and TCR genes simultaneously
+
+```{r}
+microglia <- subset(microglia,subset = annotation_V1 != "microglia_9")
+```
+
+```{r}
+DimPlot(microglia,group.by = "annotation_V1",label = T)
+```
+
+
+```{r}
+microglia <- NormalizeData(microglia,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+microglia <- FindVariableFeatures(object = microglia, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+
+VariableFeaturePlot(microglia,selection.method = "mean.var.plot")
+
+microglia <- ScaleData(object = microglia, features = VariableFeatures(object = microglia), vars.to.regress = c("nCount_RNA", "percent.mt"))
+microglia <- RunPCA(object = microglia,
+                features =  VariableFeatures(object = microglia),
+                dims = 1:30)
+gc()
+
+ElbowPlot(microglia,ndims = 30)
+```
+
+```{r}
+microglia <- RunHarmony(object = microglia, group.by.vars = c("batch_ID"), max.iter.harmony = 20)
+microglia <- RunUMAP(microglia,dims = 1:20,reduction = "harmony")
+microglia <- RunTSNE(microglia,dims = 1:20,reduction = "harmony")
+
+microglia <- FindNeighbors(microglia, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  microglia <- FindClusters(object = microglia, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+microglia <- JoinLayers(microglia)
+```
+```{r}
+save(microglia,file = "data/GBM_RNA_10_microglia_V3p1_alt.Robj")
+```
+
+
+```{r}
+DimPlot(microglia,group.by = "annotation_V1",label = T)
+DimPlot(microglia,group.by = "RNA_snn_res.0.5",label = T,split.by = "progress")
+```
+
+```{r}
+DimPlot(microglia,group.by = "RNA_snn_res.0.3",label = T,split.by = "progress")
+```
+
+```{r}
+DotPlot(microglia,features = c("P2ry12","Cd44","Sall1","Adgre1","Tgfbi","Ms4a7","Clec7a","Ccl3","Ccl4","Il2ra","Nos2","Il1b","Arg1","Lyz2","Trem2","Apoe","Cx3cr1","Itgam","Mrc1","Hoxb8","Itgax","Igf1","Spp1","Gpnmb","Fabp5","Mki67","Top2a"),group.by = "RNA_snn_res.0.5",cluster.idents = T)+RotatedAxis()
+```
+```{r}
+DotPlot(microglia,features = c("P2ry12","Cd44","Tmem119","Sall1","Adgre1","Cd74","Il6","Tgfbi","Fosb","Dusp1","Nr4a1","Fgl2","Stat1","Hspa1a","Chst2","Fos","Ifit3","Ccl3","Ccl4","Ccr6","Jam2","Il1b","Il7r","Arg1","Cstb","Lyz2","Jun","Junb","Cx3cr1","Itgam","Mrc1","Itgax","Igf1","Spp1","Gpnmb","Fabp5","Acp5","Lgals3","Mki67","Top2a"),group.by = "RNA_snn_res.0.5",cluster.idents = T)+RotatedAxis()+theme(axis.text=element_text(size=8),
+        axis.title=element_text(size=8,face="bold"),
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8))
+```
+
+
+MG0 Trem2 Jam2 Gpr155 Csmd3 Ccr6 high 
+MG1: Nr4a1 Fos high
+MG2: Il7r Hspa1a high 
+MG3: Chst2 high
+MG4: Fosb Dusp1 high
+MG5: leaky dude
+MG6: PAM; proliferative-region_associated microglia (c6)
+MG7: Ifn-responsive
+MG8 is proliferating microglia
+MG9 is BAM-like (but Sprac+)
+
+```{r}
+microglia@meta.data <- microglia@meta.data %>%
+  mutate(annotation_V2 = case_match(
+    as.character(RNA_snn_res.0.5),
+    "0" ~ "Trem2_Ccr6_high_MG",
+    "1" ~ "Nr4a1_Fos_high_MG",
+    "2" ~ "Il7r_Hspa1a_high_MG",
+    "3" ~ "Chst2_high_MG",
+    "4" ~ "Fosb_Dusp1_high_MG",
+    "5" ~ "unknown_MG",
+    "6" ~ "PAM",
+    "7" ~ "Ifn-responsive_MG",
+    "8" ~ "proliferating microglia",
+    "9" ~ "BAM-like_Sparc+"
+  ),
+  cell_type_V2 = case_match(
+    annotation_V2,
+    "proliferating microglia" ~ "microglia",
+    .default = "microglia"
+  ),
+  annotation_main = case_match(
+    cell_type_V2,
+    "proliferating microglia" ~ "microglia",
+    .default = "microglia"))
+
+```
+
+```{r}
+DimPlot(microglia,group.by = "annotation_V2",label = T,split.by = "progress")
+```
+
+```{r}
+save(microglia,file = "data/GBM_RNA_10_microglia_V3p1_alt.Robj")
+```
+
+
+## reload MG and create newer labels with stage abundance information
+
+```{r}
+load("data/GBM_RNA_10_microglia_V3p1_alt.Robj")
+```
+
+```{r}
+DimPlot(microglia,group.by = "annotation_V2",label = F,split.by = "progress") + scale_color_manual(values = pal)
+DimPlot(microglia,group.by = "RNA_snn_res.0.5",label = T,split.by = "progress") + scale_color_manual(values = pal)
+```
+plot proportions:
+
+```{r}
+MG_prop <- microglia@meta.data %>% group_by(annotation_V2,progress,RNA_snn_res.0.5) %>% count() %>% ungroup() %>% group_by(progress) %>%
+  mutate(percentage = `n` / sum(`n`)) %>% ungroup %>% arrange(percentage) %>%
+  mutate(labels = scales::percent(percentage))
+```
+
+```{r}
+g <- ggplot(MG_prop, aes(x = "", y = percentage, fill = annotation_V2)) +
+  geom_col(color = "black") +
+  ggrepel::geom_label_repel(aes(label = labels),
+            position = position_stack(vjust = 0.5),
+            show.legend = FALSE,max.overlaps = 15) +
+  guides(fill = guide_legend(title = "Annotation V2",ncol = 2)) +
+  scale_fill_manual(values = pal) +
+  facet_wrap(~progress) +
+  coord_polar(theta = "y") +
+  theme_void()
+g
+ggsave("MG_ann_V2_progress_prop_pie_charts.pdf",plot = g,width = 15, height = 10)
+```
+
+NT-high: 0 (Trem2-Ccr6-high), 4 (Fobs_Dusp7), 9 Sparc+ BAM-like
+Heterogeneous: 5 (unkown MG)
+LGG: 1 (Nr4a1_Fos high),2 (Il7r_Hspa1a),7 (Ifn_resp)
+HGG: 6 (PAM-like), 8 (proliferating), 3 (Chst2_high)
+
+```{r}
+microglia@meta.data <- microglia@meta.data %>%
+  mutate(annotation_V2 = case_match(
+    as.character(RNA_snn_res.0.5),
+    "0" ~ "NT-HIGH_Trem2_Ccr6_high_MG",
+    "1" ~ "LGG-HIGH_Nr4a1_Fos_high_MG",
+    "2" ~ "LGG-HIGH_Il7r_Hspa1a_high_MG",
+    "3" ~ "HGG-HIGH_Chst2_high_MG",
+    "4" ~ "NT-HIGH_Fosb_Dusp1_high_MG",
+    "5" ~ "HET_unknown_MG",
+    "6" ~ "HGG-HIGH_PAM",
+    "7" ~ "LGG-HIGH_Ifn-responsive_MG",
+    "8" ~ "HGG-HIGH_proliferating microglia",
+    "9" ~ "NT-HIGH_BAM-like_Sparc+"
+  ),
+  cell_type_V2 = case_match(
+    RNA_snn_res.0.5,
+    "0" ~ "NT-HIGH_MG",
+    "1" ~ "LGG-HIGH_MG",
+    "2" ~ "LGG-HIGH_MG",
+    "3" ~ "HGG-HIGH_MG",
+    "4" ~ "NT-HIGH_MG",
+    "5" ~ "COMMON_MG",
+    "6" ~ "HGG-HIGH_MG",
+    "7" ~ "LGG-HIGH_MG",
+    "8" ~ "HGG-HIGH_MG",
+    "9" ~ "NT-HIGH_MG",
+    .default = "Microglia"
+  ),
+  annotation_main = case_match(
+    cell_type_V2,
+    "proliferating microglia" ~ "microglia",
+    .default = "Microglia"))
+
+```
+
+```{r}
+DimPlot(microglia,group.by = "annotation_V2",label = F,split.by = "progress") + scale_color_manual(values = pal)
+DimPlot(microglia,group.by = "cell_type_V2",label = F,split.by = "progress") + scale_color_manual(values = pal)
+```
+
+
+```{r}
+save(microglia,file = "data/GBM_RNA_10_microglia_V3p1_alt.Robj")
+```
+
+# merge immune cell subset
+
+```{r}
+immune <- merge(microglia,y = c(myeloid,lymphoid))
+```
+
+
+```{r}
+immune <- NormalizeData(immune,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+immune <- FindVariableFeatures(object = immune, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+VariableFeatures(immune) <-  VariableFeatures(immune) [!grepl("^Tra|^Trb|^Igh|^Igk|^Mamu-a|^Gm|Rik$", VariableFeatures(immune))]
+VariableFeaturePlot(immune,selection.method = "mean.var.plot")
+
+immune <- ScaleData(object = immune, features = VariableFeatures(object = immune), vars.to.regress = c("nCount_RNA", "percent.mt"))
+immune <- RunPCA(object = immune,
+                features =  VariableFeatures(object = immune),
+                dims = 1:50)
+gc()
+
+ElbowPlot(immune,ndims = 50)
+immune <- RunHarmony(object = immune, group.by.vars = c("batch_ID"), max.iter.harmony = 20)
+immune <- RunUMAP(immune,dims = 1:40,reduction = "harmony")
+immune <- RunTSNE(immune,dims = 1:40,reduction = "harmony")
+
+immune <- FindNeighbors(immune, dims = 1:40,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  immune <- FindClusters(object = immune, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+immune <- JoinLayers(immune)
+
+```
+```{r}
+library(RColorBrewer)
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"))
+pal[2] <- "red3"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+```
+
+```{r}
+g <- DimPlot(immune,group.by = "annotation_main",label = T,label.size = 2)+
+  scale_color_manual(values = pal)+
+  theme(legend.position="bottom",legend.text = element_text(size = 8),
+        legend.title = element_text(size = 10),
+        axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))+ 
+  guides(color = guide_legend(ncol = 10))
+g
+ggsave("test_annotation_main_immune_cells.pdf", plot = g, width = 10, height = 10)
+```
+
+```{r}
+DimPlot(immune,group.by = "cell_type_V2",label = T,label.size = 2)+
+  scale_color_manual(values = pal)+
+  theme(legend.position="bottom",legend.text = element_text(size = 8),
+        legend.title = element_text(size = 10),
+        axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))+ 
+  guides(color = guide_legend(ncol = 10))
+```
+
+```{r}
+save(immune,file = "data/GBM_RNA_10_immune_cells_V3_merged_alt.Robj")
+```
+
+# creating palette for more than 24 groups
+
+```{r}
+plot(1:8, 1:8, col=1:8, pch=19, cex=3, xlab="", ylab="")
+```
+
+```{r}
+ggplotColors <- function(g){
+  d <- 360/g
+  h <- cumsum(c(15, rep(d,g - 1)))
+  hcl(h = h, c = 100, l = 65)
+}
+
+```
+
+```{r}
+# test_pal <- ggplotColors(50) # continuous colors 
+
+plot(1:30, 1:30, col=colors()[1:30], pch=19, cex=3, xlab="", ylab="") # colors 
+abline(h = seq(0,30,5))
+abline(v= seq(0,30,5))
+```
+
+```{r}
+plot(31:60, 31:60, col=colors()[31:60], pch=19, cex=3, xlab="", ylab="") # colors 
+abline(h = seq(30,60,5))
+abline(v= seq(30,60,5))
+```
+
+```{r}
+plot(61:90, 61:90, col=colors()[61:90], pch=19, cex=3, xlab="", ylab="") # colors 
+abline(h = seq(60,90,5))
+abline(v= seq(60,90,5))
+```
+
+
+```{r}
+library(RColorBrewer)
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+```
+
+
+```{r}
+plot(1:32, 1:32, col=pal, pch=19, cex=3, xlab="", ylab="") # current pallete
+abline(h = c(5,10,15,20,25,30))
+abline(v= c(5,10,15,20,25,30))
+# [28] is too light
+# [13] is close
+# [19] is also close; 
+```
+
+```{r}
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+```
+
+```{r}
+plot(1:32, 1:32, col=pal, pch=19, cex=3, xlab="", ylab="") # current pallete
+abline(h = c(5,10,15,20,25,30))
+abline(v= c(5,10,15,20,25,30))
+```
+```{r}
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10)])
+```
+
+
+```{r}
+plot(1:43, 1:43, col=pal, pch=19, cex=2, xlab="", ylab="") # current pallete
+abline(h = seq(5,40,5))
+abline(v= seq(5,50,5))
+# [31 is slightly redundant; can be lighter]
+```
+```{r}
+pal[31] <- colors()[54]
+```
+
+```{r}
+plot(1:43, 1:43, col=pal, pch=19, cex=2, xlab="", ylab="") # current pallete
+abline(h = seq(5,40,5))
+abline(v= seq(5,50,5))
+```
+
+```{r}
+plot(91:120, 91:120, col=colors()[91:120], pch=19, cex=3, xlab="", ylab="") # colors 
+abline(h = seq(95,120,5))
+abline(v= seq(95,120,5))
+```
+
+```{r}
+plot(121:150, 121:150, col=colors()[121:150], pch=19, cex=3, xlab="", ylab="") # colors 
+abline(h = seq(125,150,5))
+abline(v= seq(125,150,5))
+```
+
+```{r}
+pal <- c(pal,colors()[c(139,107,108,120,113,119,121,143)])
+```
+
+```{r}
+plot(1:51, 1:51, col=pal, pch=19, cex=2, xlab="", ylab="") # current pallete
+```
+
+```{r}
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+
+```
+
+```{r}
+plot(1:51, 1:51, col=pal, pch=19, cex=1, xlab="", ylab="") # current pallete
+```
+
+```{r}
+new_pal <- sample(pal)
+```
+
+```{r}
+plot(1:51, 1:51, col=new_pal, pch=19, cex=2, xlab="", ylab="") # current pallete
+```
+## Try palette on Immune cell annotations
+
+```{r}
+g <- DimPlot(immune,group.by = "annotation_V2",label = T,label.size = 2, pt.size = 1.5,label.box = T,repel = T,shuffle = T,label.color = "white")+
+  scale_color_manual("Annotation",values = new_pal)+
+  scale_fill_manual(values = new_pal)+
+  theme(legend.position="bottom",legend.text = element_text(size = 12),
+        legend.title = element_text(size = 12))+ 
+  guides(color = guide_legend(ncol = 6,override.aes = list(size=2)))
+g
+ggsave("test_annotation_V2_immune_cells.pdf", plot = g, width = 15, height = 20)
+```
+
+# Test meta cells
+
+## Test on MG
+
+```{r}
+library(metacell)
+```
+
+```{r}
+load("data/GBM_RNA_10_immune_cells_V3_merged_alt.Robj")
+```
+
+
+```{r}
+if(!dir.exists("MetaCell_Imm_db/")) dir.create("MetaCell_Imm_db/")
+scdb_init("MetaCell_Imm_db/", force_reinit=T)
+```
+
+```{r}
+if(!dir.exists("MetaCell_Imm_figs/")) dir.create("MetaCell_Imm_figs/")
+scfigs_init("MetaCell_Imm_figs/")
+```
+
+```{r}
+sce = as.SingleCellExperiment(immune)
+mat = scm_import_sce_to_mat(sce)
+```
+
+```{r}
+scdb_add_mat('Imm_test', mat)
+```
+
+
+```{r}
+mcell_plot_umis_per_cell("Imm_test")
+```
+
+
+```{r}
+nms = c(rownames(mat@mat), rownames(mat@ignore_gmat))
+ig_genes = c(grep("^Igj", nms, v=T), 
+                grep("^Igh",nms,v=T),
+                grep("^Igk", nms, v=T), 
+                grep("^Igl", nms, v=T))
+
+bad_genes = unique(c(grep("^Mt-", nms, v=T), grep("^Mtmr", nms, v=T), grep("^Mtnd", nms, v=T),"Neat1","Tmsb4x", "Tmsb10", ig_genes))
+
+bad_genes
+```
+
+```{r}
+mcell_mat_ignore_genes(new_mat_id="Imm_test", mat_id="Imm_test", bad_genes, reverse=F) 
+```
+
+```{r}
+mcell_mat_ignore_small_cells("Imm_test", "Imm_test", 800)
+```
+
+```{r}
+mcell_add_gene_stat(gstat_id="Imm_test", mat_id="Imm_test", force=T)
+```
+
+```{r}
+mcell_gset_filter_varmean(gset_id="test_feats", gstat_id="Imm_test", T_vm=0.08, force_new=T)
+mcell_gset_filter_cov(gset_id = "test_feats", gstat_id="Imm_test", T_tot=100, T_top3=2)
+```
+
+```{r}
+mcell_plot_gstats(gstat_id="Imm_test", gset_id="test_feats")
+```
+
+```{r}
+mcell_add_cgraph_from_mat_bknn(mat_id="Imm_test", 
+                gset_id = "test_feats", 
+                graph_id="test_graph",
+                K=100,
+                dsamp=T)
+```
+
+```{r}
+mcell_coclust_from_graph_resamp(
+                coc_id="test_coc500", 
+                graph_id="test_graph",
+                min_mc_size=20, 
+                p_resamp=0.75, n_resamp=500)
+```
+
+```{r}
+mcell_mc_from_coclust_balanced(
+                coc_id="test_coc500", 
+                mat_id= "Imm_test",
+                mc_id= "test_mc", 
+                K=30, min_mc_size=30, alpha=2)
+```
+
+
+```{r}
+mcell_plot_outlier_heatmap(mc_id="test_mc", mat_id = "Imm_test", T_lfc=3)
+
+mcell_mc_split_filt(new_mc_id="test_mc_f", 
+            mc_id="test_mc", 
+            mat_id="Imm_test",
+            T_lfc=3, plot_mats=F)
+```
+
+
+
+
+
+
+```{r}
+mc_colorize_default("test_mc_f")
+```
+
+```{r}
+mcell_gset_from_mc_markers(gset_id = "test_markers", mc_id = "test_mc_f")
+```
+
+
+```{r}
+mcell_mc_plot_marks(mc_id = "test_mc_f", gset_id = "test_markers", mat_id = "Imm_test", plot_cells=T)
+```
+
+```{r}
+mcell_mc2d_force_knn(mc2d_id="test_2dproj",mc_id="test_mc_f", graph_id="test_graph")
+tgconfig::set_param("mcell_mc2d_height",1000, "metacell")
+tgconfig::set_param("mcell_mc2d_width",1000, "metacell")
+mcell_mc2d_plot(mc2d_id="test_2dproj")
+```
+
+```{r}
+mc_hc = mcell_mc_hclust_confu(mc_id="test_mc_f", 
+                                            graph_id="test_graph")
+```
+
+```{r}
+mc_sup = mcell_mc_hierarchy(mc_id="test_mc_f",
+                                                    mc_hc=mc_hc, T_gap=0.04)
+mcell_mc_plot_hierarchy(mc_id="test_mc_f", 
+                   graph_id="test_graph", 
+                    mc_order=mc_hc$order, 
+                    sup_mc = mc_sup, 
+                    width=2800, heigh=2000, min_nmc=2)
+```
+
+

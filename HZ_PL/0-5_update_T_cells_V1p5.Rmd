@@ -1,0 +1,271 @@
+---
+title: "0-5_update_T_cells_V1p5"
+output: html_document
+date: "2024-10-01"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony) # for integration
+```
+
+```{r}
+RDSdir <- "RDS/"
+outdir <- "R_outs/"
+```
+
+
+```{r}
+library(RColorBrewer)
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+```
+
+
+
+```{r}
+load(paste0(RDSdir,"T_cells_V1p4.Robj"))
+```
+
+```{r}
+DimPlot(T_cells,group.by = "RNA_snn_res.0.6",label = T)
+```
+" a lot of ribosome signature on cluster 16 and mitochondrial gene on cluster 6 (resolution 0.6)."
+"cluster 5 and 14 (resolution 0.6) are pure NK cells"
+
+```{r}
+Idents(T_cells) <- "RNA_snn_res.0.6"
+```
+
+```{r}
+FeaturePlot(T_cells,features = "Klrb1c",label = T)
+FeaturePlot(T_cells,features = "Cd3e",label = T)
+```
+
+```{r}
+NK <- subset(T_cells, idents = c(5,14))
+T_cells <- subset(T_cells, idents = c(0:20)[!c(0:20) %in% c(5,14)])
+```
+
+```{r}
+DimPlot(T_cells,group.by = "RNA_snn_res.0.6",label = T)
+DimPlot(NK,group.by = "RNA_snn_res.0.6",label = T)
+```
+```{r eval=FALSE}
+save(T_cells, file = paste0(RDSdir,"T_cells_V1p5.Robj"))
+save(NK, file = paste0(RDSdir,"NK_V1p5.Robj"))
+```
+
+Regress mito and ribo
+
+```{r}
+PercentageFeatureSet(T_cells,pattern="^Rp[ls]") -> T_cells$percent.ribo
+```
+
+```{r}
+head(T_cells$percent.ribo)
+```
+
+
+```{r}
+T_cells <- FindVariableFeatures(object = T_cells, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(T_cells) <-  VariableFeatures(T_cells) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(T_cells))]
+VariableFeaturePlot(T_cells)
+
+T_cells <- ScaleData(object = T_cells, features = VariableFeatures(object = T_cells), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+T_cells <- RunPCA(object = T_cells,
+                features =  VariableFeatures(object = T_cells),
+                dims = 1:50)
+gc()
+ElbowPlot(T_cells,ndims = 50)
+```
+
+```{r}
+T_cells <- RunUMAP(T_cells,dims = 1:30,reduction = "harmony") # use harmony embedding for downstream analysis
+T_cells <- RunTSNE(T_cells,dims = 1:30,reduction = "harmony")
+
+T_cells <- FindNeighbors(T_cells, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  T_cells <- FindClusters(object = T_cells, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+T_cells <- JoinLayers(T_cells) # required for seurat V5
+```
+
+```{r}
+DimPlot(T_cells,group.by = "RNA_snn_res.1",label = T)
+DimPlot(T_cells,group.by = "RNA_snn_res.0.1",label = T)
+```
+```{r}
+FeaturePlot(T_cells,"percent.mt",label = T)
+FeaturePlot(T_cells,"percent.ribo",label = T)
+FeaturePlot(T_cells,"log10_nCount_RNA",label = T)
+FeaturePlot(T_cells,"log10_nFeature_RNA",label = T)
+FeaturePlot(T_cells,"Mki67",label = T)
+```
+```{r}
+VlnPlot(T_cells,features = "percent.mt", group.by = "genotype",alpha = 0.1)
+VlnPlot(T_cells,features = "percent.mt", group.by = "RNA_snn_res.1",alpha = 0.1)
+VlnPlot(T_cells,features = "Rpl32", group.by = "RNA_snn_res.1",alpha = 0.1)
+```
+
+
+```{r}
+FeaturePlot(T_cells,features = c("Mki67"),label = T)
+FeaturePlot(T_cells,features = c("Tox"),label = T)
+FeaturePlot(T_cells,features = c("Gzmk"),label = T)
+FeaturePlot(T_cells,features = c("Ccr7"),label = T)
+FeaturePlot(T_cells,features = c("Tcf7"),label = T)
+FeaturePlot(T_cells,features = c("Cd3e"),label = T)
+FeaturePlot(T_cells,features = c("Cd8a"),label = T)
+FeaturePlot(T_cells,features = c("Cd4"),label = T)
+FeaturePlot(T_cells,features = c("Klrb1c"),label = T)
+FeaturePlot(T_cells,features = c("Bcl3"),label = T)
+FeaturePlot(T_cells,features = c("Cd69"),label = T)
+FeaturePlot(T_cells,features = c("Entpd1"),label = T)
+```
+
+```{r}
+FeaturePlot(T_cells,features = c("Rorc"),label = T)
+```
+
+```{r}
+DotPlot(T_cells,features = c("Cd4","Foxp3","Gata3","Rorc","Trdv1","Tbx21","Ctla4","Icos","Cd8a","Ccr7","Sell","Tcf7","Lef1","Gzmb","Gzmk","Ifitm3","Isg15","Il2ra","Cd69","Tox","Tigit","Pdcd1","Klrb1c","Bcl6","Mki67"),cluster.idents = F)+RotatedAxis()
+```
+All Cd3e+ (prolif is partially Cd3e-)
+15: Prolif
+11: Naive-like
+
+CD4:
+4, 8, 11
+CD8:
+10: Tox+
+DN: 7,12,20,22;
+22: Rorc+ ILC?
+
+
+```{r}
+DotPlot(T_cells,features = c("Cd4","Foxp3","Gata3","Rorc","Trdv1","Tbx21","Ctla4","Icos","Cd8a","Ccr7","Sell","Tcf7","Lef1","Gzmb","Gzmk","Ifitm3","Isg15","Il2ra","Cd69","Tox","Tigit","Pdcd1","Klrb1c","Bcl6","Mki67"),group.by = "RNA_snn_res.0.1",cluster.idents = F)+RotatedAxis()
+```
+
+
+```{r}
+meta <- cbind(T_cells@meta.data, T_cells@reductions$umap@cell.embeddings)
+```
+
+
+
+```{r}
+ggplot(meta)+
+  geom_histogram(aes(x = percent.mt))+
+  facet_wrap(~genotype)
+ggplot(meta)+
+  geom_histogram(aes(x = percent.ribo))+
+  facet_wrap(~genotype)
+```
+
+```{r}
+ggplot(meta)+
+  geom_point(aes(x = percent.mt, y = nFeature_RNA, color = RNA_snn_res.1))+theme_classic()+scale_color_manual(values = pal)
+```
+
+```{r}
+ggplot(meta)+
+  geom_histogram(aes(x = percent.mt))+
+  facet_wrap(~RNA_snn_res.1)
+ggplot(meta)+
+  geom_histogram(aes(x = percent.ribo))+
+  facet_wrap(~RNA_snn_res.1)
+```
+Trim percent.mt to 3%
+
+```{r eval=FALSE}
+save(T_cells,file = paste0(RDSdir,"T_cells_V1p5.Robj"))
+```
+
+```{r}
+T_cells <- subset(T_cells, subset = percent.mt < 3)
+```
+
+```{r}
+T_cells <- FindVariableFeatures(object = T_cells, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(T_cells) <-  VariableFeatures(T_cells) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(T_cells))]
+VariableFeaturePlot(T_cells)
+
+T_cells <- ScaleData(object = T_cells, features = VariableFeatures(object = T_cells), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+T_cells <- RunPCA(object = T_cells,
+                features =  VariableFeatures(object = T_cells),
+                dims = 1:50)
+gc()
+ElbowPlot(T_cells,ndims = 50)
+```
+
+```{r}
+T_cells <- RunUMAP(T_cells,dims = 1:30,reduction = "harmony") # use harmony embedding for downstream analysis
+T_cells <- RunTSNE(T_cells,dims = 1:30,reduction = "harmony")
+
+T_cells <- FindNeighbors(T_cells, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  T_cells <- FindClusters(object = T_cells, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+T_cells <- JoinLayers(T_cells) # required for seurat V5
+```
+
+```{r}
+DimPlot(T_cells,group.by = "RNA_snn_res.1",label = T)
+DimPlot(T_cells,group.by = "RNA_snn_res.0.1",label = T)
+```
+
+```{r}
+FeaturePlot(T_cells,"percent.mt",label = T)
+FeaturePlot(T_cells,"percent.ribo",label = T)
+FeaturePlot(T_cells,"log10_nCount_RNA",label = T)
+FeaturePlot(T_cells,"log10_nFeature_RNA",label = T)
+FeaturePlot(T_cells,"Mki67",label = T)
+```
+
+```{r}
+VlnPlot(T_cells,features = "percent.mt", group.by = "genotype",alpha = 0.1)
+VlnPlot(T_cells,features = "percent.mt", group.by = "RNA_snn_res.1",alpha = 0.1)
+VlnPlot(T_cells,features = "Rpl32", group.by = "RNA_snn_res.1",alpha = 0.1)
+```
+
+
+```{r}
+FeaturePlot(T_cells,features = c("Mki67"),label = T)
+FeaturePlot(T_cells,features = c("Tox"),label = T)
+FeaturePlot(T_cells,features = c("Gzmk"),label = T)
+FeaturePlot(T_cells,features = c("Ccr7"),label = T)
+FeaturePlot(T_cells,features = c("Tcf7"),label = T)
+FeaturePlot(T_cells,features = c("Cd3e"),label = T)
+FeaturePlot(T_cells,features = c("Cd8a"),label = T)
+FeaturePlot(T_cells,features = c("Cd4"),label = T)
+FeaturePlot(T_cells,features = c("Klrb1c"),label = T)
+FeaturePlot(T_cells,features = c("Bcl3"),label = T)
+FeaturePlot(T_cells,features = c("Cd69"),label = T)
+FeaturePlot(T_cells,features = c("Entpd1"),label = T)
+```
+
+```{r}
+DotPlot(T_cells,features = c("Cd4","Foxp3","Gata3","Rorc","Trdv1","Tbx21","Ctla4","Icos","Cd8a","Ccr7","Sell","Tcf7","Lef1","Gzmb","Gzmk","Ifitm3","Isg15","Il2ra","Cd69","Tox","Tigit","Pdcd1","Klrb1c","Bcl6","Mki67"),cluster.idents = F)+RotatedAxis()
+```
+
+
+```{r}
+DotPlot(T_cells,features = c("Cd4","Foxp3","Gata3","Rorc","Trdv1","Tbx21","Ctla4","Icos","Cd8a","Ccr7","Sell","Tcf7","Lef1","Gzmb","Gzmk","Ifitm3","Isg15","Il2ra","Cd69","Tox","Tigit","Pdcd1","Klrb1c","Bcl6","Mki67"),group.by = "RNA_snn_res.0.1",cluster.idents = F)+RotatedAxis()
+```
+
+
+Limited improvement...
+
+
+

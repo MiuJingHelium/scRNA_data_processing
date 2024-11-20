@@ -1,0 +1,26 @@
+---
+title: "check CITE-seq"
+output: html_document
+date: "2024-08-02"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+```
+
+```{r}
+load("CITEseq.Robj")
+load("ADT.Robj")
+```
+
+```{r}
+CITEseq@assays
+```
+
+This is a Seurat Object with RNA assay and CITE-seq assay.However, the sample id are not added yet.
+
+```{r}
+head(rownames(CITEseq@meta.data))
+```
+

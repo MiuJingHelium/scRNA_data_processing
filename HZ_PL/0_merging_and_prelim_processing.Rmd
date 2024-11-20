@@ -1,0 +1,390 @@
+---
+title: "0_merging_and_prelim_processing"
+output: html_document
+date: "2024-08-06"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(miQC)
+library(SeuratWrappers) # for miQC
+library(harmony) # for integration
+```
+
+[Key reference: Single-cell Best Practices](https://www.sc-best-practices.org/surface_protein/quality_control.html)
+
+
+# merge whole objects and prepare prelim processing
+
+## load data
+
+```{r}
+indir <- "raw/"
+outdir <- "RDS/"
+if (!dir.exists(outdir)) dir.create(outdir)
+```
+
+
+```{r}
+sample_names <- gsub(pattern = "^[^_]*_",   replacement = "",x = list.files(indir))
+```
+
+Extract sample names and the directory to the files
+
+```{r}
+sample_names <- gsub(pattern = "SR[0-9]+_",   replacement = "",x = list.files(indir)) #remove everything before "_", I kind of hard-coded the pattern
+# alternatively, 
+sample_names <- gsub(pattern = "^[^_]*_",   replacement = "",x = list.files(indir)) 
+# This just find anything before "_" including "_" and replace the characters with "".
+
+sample_dir <- unlist(lapply(list.files(indir,full.names = T),
+                            function(x){
+                              list.files(x,full.names = T)
+                            }
+                            ))
+# lapply() iterates through a vector/list and return a list, so unlist is needed.
+```
+
+```{r}
+n_sample <- length(sample_dir)
+names(sample_dir) <- sample_names # using element from named vector will help automatic loading of sample name
+# However, for some reason, lapply without indexing does not keep the name of the element
+seu_list <- lapply(1:n_sample, function(x){
+  seu_temp <- Read10X(sample_dir[x]) # a temporary object
+  seu <- CreateSeuratObject(counts = seu_temp[["Gene Expression"]])
+  ADT <- CreateAssay5Object(counts = seu_temp[["Antibody Capture"]])
+  seu[["ADT"]] <- ADT
+  seu
+})
+names(seu_list) <- sample_names # name the elements by the sample name
+```
+```{r}
+table(seu_list[[1]]$orig.ident)
+```
+
+```{r}
+colnames(seu_list[[1]]@meta.data)
+```
+
+
+## run sample specific QC
+
+Since doublet may still exist after QC, I'll only run miQC
+
+```{r}
+seu_list <- lapply(seu_list, function(x){
+  x[["percent.mt"]] <- PercentageFeatureSet(object = x, pattern = "^mt|^Mt")
+  x <- RunMiQC(x, percent.mt = "percent.mt", nFeature_RNA = "nFeature_RNA", posterior.cutoff = 0.8,
+               model.slot = "flexmix_model")
+  x
+})
+```
+
+
+## merge seurat objects
+
+```{r}
+whole <- Reduce(function(x, y) merge(x, y), seu_list)
+```
+
+```{r}
+table(whole$orig.ident)
+```
+
+## generate additional metrics and perform QC
+
+```{r}
+whole$log10_nCount_RNA <- log10(whole$nCount_RNA+1) # add a pseudcount offset to prevent log10(0)
+whole$log10_nFeature_RNA <- log10(whole$nFeature_RNA+1)
+whole$log10_nCount_ADT <- log10(whole$nCount_ADT+1) 
+whole$log10_nFeature_ADT <- log10(whole$nFeature_ADT+1)
+```
+
+```{r}
+colnames(whole@meta.data)
+```
+
+
+```{r}
+VlnPlot(whole,features = c("log10_nFeature_RNA","log10_nCount_RNA"),group.by = "orig.ident",alpha = 0.1) #the sample quality are very similar
+```
+
+```{r}
+VlnPlot(whole,features = c("log10_nFeature_RNA","log10_nCount_RNA"),group.by = "orig.ident",alpha = 0.1,split.by = "miQC.keep")
+```
+```{r}
+ggplot(whole@meta.data,aes(x = log10_nCount_RNA, y = percent.mt, color = miQC.keep))+
+  geom_point()
+```
+```{r}
+ggplot(whole@meta.data,aes(x = percent.mt))+
+  geom_histogram()+
+  facet_wrap(~miQC.keep,scales = "free",ncol = 1) # we can see that the cutoff is around 4%. 
+ggplot(whole@meta.data,aes(x = log10_nFeature_RNA))+
+  geom_histogram()+
+  facet_wrap(~miQC.keep,scales = "free",ncol = 1) # nFeature is not so affected by percent.mt
+ggplot(whole@meta.data,aes(x = log10_nCount_RNA))+
+  geom_histogram()+
+  facet_wrap(~miQC.keep,scales = "free",ncol = 1) # but nCount can be affected.
+# To be aggressive in QC, we can choose 4% as the hard cut-off.
+# for later QC info query, let's save the untouched whole object and store the QC'ed version in a different RDS object
+# saveRDS() is more compressed than save(), but saveRDS() does not retain the object name.
+```
+```{r eval=FALSE}
+save(whole, file = paste0(outdir,"whole.Robj"))
+```
+
+```{r}
+whole <- subset(whole, subset = percent.mt < 4)
+```
+
+```{r}
+ggplot(whole@meta.data,aes(x = percent.mt))+
+  geom_histogram()+
+  facet_wrap(~miQC.keep,scales = "free",ncol = 1) 
+ggplot(whole@meta.data,aes(x = log10_nFeature_RNA))+
+  geom_histogram()+
+  facet_wrap(~miQC.keep,scales = "free",ncol = 1) 
+ggplot(whole@meta.data,aes(x = log10_nCount_RNA))+
+  geom_histogram()+
+  facet_wrap(~miQC.keep,scales = "free",ncol = 1) 
+# we can see that there are still some cells suggested for discard remaining but the distribution for nCount and nFeature are about the same. To avoid noises from small number of outlier cells, we can perform hard trimming on nCount and nFeature as well.
+```
+```{r}
+range(whole$log10_nCount_RNA)
+range(whole$nCount_RNA) # there is no need to trim by nCount
+range(whole$log10_nFeature_RNA)
+range(whole$nFeature_RNA)
+```
+
+
+```{r}
+whole <- subset(whole, subset = log10_nFeature_RNA > 2.5)
+```
+
+```{r warning=FALSE}
+ggplot(whole@meta.data,aes(x = percent.mt))+
+  geom_histogram()+
+  facet_wrap(~miQC.keep,scales = "free",ncol = 1) 
+ggplot(whole@meta.data,aes(x = log10_nFeature_RNA))+
+  geom_histogram()+
+  facet_wrap(~miQC.keep,scales = "free",ncol = 1) 
+ggplot(whole@meta.data,aes(x = log10_nCount_RNA))+
+  geom_histogram()+
+  facet_wrap(~miQC.keep,scales = "free",ncol = 1)
+```
+```{r eval=FALSE}
+save(whole,file = paste0(outdir,"whole_V1.Robj")) # mark as V1 or any other easy to track version naming
+```
+
+```{r}
+table(whole$orig.ident)
+# Previously:
+# EKO     FE2     FE3  FE4.01  FE4.02    TEKO    TFE2    TFE3 TFE4.01 TFE4.02 
+#   8756    8886    3120     916    2677   10690    9045    9111    5083   10287 
+
+# Now
+# EKO     FE2     FE3  FE4.01  FE4.02    TEKO    TFE2    TFE3 TFE4.01 TFE4.02 
+#   8486    8681    3024     881    2549   10328    8710    8736    4956   10094 
+```
+
+# data processing and preparation for analysis
+
+```{r}
+DefaultAssay(whole) <- "RNA"
+```
+
+```{r}
+ncol(whole) # There are total of 66445 cells.
+```
+
+```{r}
+# parameters can be changed but doesn't matter much for most of the analysis
+whole <- NormalizeData(object = whole, normalization.method = "LogNormalize", scale.factor = 10000)
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(whole) <-  VariableFeatures(whole) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(whole))]
+VariableFeaturePlot(whole)
+
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+```
+Based on the ElbowPlot, 30-40 PC is enough for the variability. We can use 30 for V1.
+
+```{r}
+# you can verify that Tra and Trb genes are removed from variable features
+# VariableFeatures(whole)[grep("^Tr",VariableFeatures(whole))]
+```
+
+```{r message=FALSE}
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20) # use harmony to correct for batch effect
+whole <- RunUMAP(whole,dims = 1:30,reduction = "harmony") # use harmony embedding for downstream analysis
+whole <- RunTSNE(whole,dims = 1:30,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+whole <- JoinLayers(whole) # required for seurat V5
+```
+
+## check ADT
+
+```{r message=FALSE}
+
+ggplot(whole@meta.data,aes(x = nFeature_ADT))+
+  geom_histogram()+
+  facet_wrap(~miQC.keep,scales = "free",ncol = 1) 
+ggplot(whole@meta.data,aes(x = log10_nCount_ADT))+
+  geom_histogram()+
+  facet_wrap(~miQC.keep,scales = "free",ncol = 1)
+ggplot(whole@meta.data,aes(x = nCount_ADT))+
+  geom_histogram()+
+  facet_wrap(~miQC.keep,scales = "free",ncol = 1)
+```
+
+
+
+```{r}
+DefaultAssay(whole) <- "ADT"
+whole <- NormalizeData(whole, normalization.method = "CLR", margin = 2) # normalize across cells
+whole <- ScaleData(whole, assay = "ADT")
+whole <- JoinLayers(whole)
+DefaultAssay(whole) <- "RNA"
+```
+
+
+```{r}
+DimPlot(whole, reduction = "umap",group.by = "orig.ident",shuffle = T)
+```
+
+```{r}
+DimPlot(whole, reduction = "umap",group.by = "RNA_snn_res.0.1")
+```
+
+```{r}
+rownames(whole[["ADT"]]) # need CD3, CD8, CD4
+# CCR7 + CD62L for naive T
+# CD73 and CD62L for B cells
+```
+
+
+```{r}
+# check for possible immune cell types
+# erythrocytes and platelets are rare but maybe also detected
+DotPlot(whole,features = c("Mki67","Ptprc","Cd3e","Cd8a","Cd4","Foxp3","Gata3","Rorc","Tcf7","Tox","Cd19","Flt3","Cd44","Ncam1","Xcr1","Ncr1","Siglech","S100a8","Mpo","Ccr2","Fcer1a","Fcer2a","Hbb-bs","Alas2","Pf4"),group.by = "RNA_snn_res.0.1",cluster.idents = T)+RotatedAxis()
+# some of the markers are cell-state markers because cells can cluster by cell-states.
+# This is important for ruling out doublet/multiplet clusters
+```
+
+Some of the clusters are not entirely clean, so we can either divide into subsets and re-cluster or increase the resolution.
+
+c1: Cd19+ Fcer2a+ --> B cells
+
+c9: Flt3+ Siglech+ --> pDC (may have other cell types)
+c10: Xcr1+ Flt3+ cDC1 (Ccr2+)
+
+c8: Cd3e+ Cd8a+ --> T cells with other cell types; proliferting T cells
+c3: NK and NKT
+c2: Cd3e+ weak Cd8a --> T cells 
+c11: Rorc+ Cd3e+ --> unconventional T cells
+c4: Cd3e+Cd4+ --> T cells
+c5: T
+c0: T
+
+c6 is strange: Rorc+ Ccr2+
+c12 is Ptprc low and has a bit of everything
+```{r}
+Idents(whole) <- "RNA_snn_res.0.1"
+FeaturePlot(whole,features = "Ppbp",label = T,reduction = "umap") # platelet
+FeaturePlot(whole,features = "Pf4",label = T,reduction = "umap") # platelet
+FeaturePlot(whole,features = "Alas2",label = T,reduction = "umap") # erythrocyte
+FeaturePlot(whole,features = "Hbb-bs",label = T,reduction = "umap") # erythrocyte
+```
+```{r}
+FeaturePlot(whole,features = "Cd3e",label = T,reduction = "umap") # T cells
+FeaturePlot(whole,features = "Cd3e",label = T,reduction = "umap") # CD8 cells
+FeaturePlot(whole,features = "Cd3e",label = T,reduction = "umap") # CD4 cells
+FeaturePlot(whole,features = "Ncr1",label = T,reduction = "umap") # NK/NKT cells
+FeaturePlot(whole,features = "Klrb1c",label = T,reduction = "umap") # NK/NKT cells
+FeaturePlot(whole,features = "Cd19",label = T,reduction = "umap") # B cells
+FeaturePlot(whole,features = "Cd79a",label = T,reduction = "umap") # B cells
+FeaturePlot(whole,features = "Cd19",label = T,reduction = "umap") # B cells
+FeaturePlot(whole,features = "Flt3",label = T,reduction = "umap") # DCs
+FeaturePlot(whole,features = "Ccr2",label = T,reduction = "umap") # 
+```
+
+
+```{r}
+ADT_mat <- as.data.frame(t(whole@assays$ADT@layers$data))
+colnames(ADT_mat) <- rownames(whole[["ADT"]])
+rownames(ADT_mat) <- colnames(whole[["ADT"]])
+```
+
+```{r}
+ggplot(ADT_mat) +
+  geom_histogram(aes(x = CD3))
+```
+```{r}
+range(ADT_mat$CD3) # need to remove outliers
+```
+
+```{r}
+ADT_mat <- as.data.frame(t(whole@assays$ADT@layers$counts))
+colnames(ADT_mat) <- rownames(whole[["ADT"]])
+rownames(ADT_mat) <- colnames(whole[["ADT"]])
+```
+
+```{r}
+range(log10(ADT_mat$CD3+1))
+hist(log10(ADT_mat$CD3+1))
+```
+```{r}
+ADT_mat <- as.data.frame(log10(ADT_mat+1))
+```
+
+```{r}
+ggplot(ADT_mat) +
+  geom_histogram(aes(x = CD3))
+```
+```{r}
+ADT_for_plot <- cbind(ADT_mat,whole@reductions$umap@cell.embeddings)
+```
+
+```{r}
+ggplot(ADT_for_plot)+
+  geom_point(aes(x = umap_1, y = umap_2,colour = CD3))+scale_color_gradientn(colours = c("grey90","coral","red2"))+theme_classic()
+ggplot(ADT_for_plot)+
+  geom_point(aes(x = umap_1, y = umap_2,colour = NK1.1))+scale_color_gradientn(colours = c("grey90","coral","red2"))+theme_classic()
+```
+
+
+## RNA + ADT
+
+```{r}
+DefaultAssay(whole) <- "ADT"
+p1 <- FeaturePlot(whole, "CD3", cols = c("lightgrey", "red2")) + ggtitle("CD3 protein")
+DefaultAssay(whole) <- "RNA"
+p2 <- FeaturePlot(whole, "Cd3e") + ggtitle("CD3 RNA")
+
+p1 | p2
+```
+
+```{r}
+DefaultAssay(whole) <- "ADT"
+p1 <- FeaturePlot(whole, "NK1.1", cols = c("lightgrey", "red2")) + ggtitle("NK1.1 protein")
+DefaultAssay(whole) <- "RNA"
+p2 <- FeaturePlot(whole, "Ncr1") + ggtitle("NK1.1 RNA")
+
+p1 | p2
+```
+
+```{r eval=FALSE}
+save(whole,file = paste0(outdir,"whole_V1.Robj"))
+```
+

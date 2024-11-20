@@ -1,0 +1,272 @@
+---
+title: "scRepretoire analysis on conventional T cells after artifact removal"
+output: html_document
+date: "2024-06-06"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(scater)
+library(data.table)
+library(RColorBrewer)
+library(gridExtra)
+library(ggrepel)
+library(kableExtra)
+library(scRepertoire)
+library(ggraph)
+library(circlize)
+library(scales)
+library(harmony)
+```
+
+```{r}
+outdir <- "TCR_outs/"
+
+```
+
+
+# clean conventional T cell subset
+
+```{r}
+load("../V2_processing_analysis/R_outs/lymphoid_convT_V2p1_merged_scRep.Robj")
+```
+
+```{r}
+DimPlot(screp,group.by = "RNA_snn_res.0.4")
+```
+
+## Remove cluster 7
+
+```{r}
+Idents(screp) <- "RNA_snn_res.0.4"
+```
+
+```{r}
+table(Idents(screp))
+```
+
+```{r}
+screp <- subset(screp,idents = c(0:6,8:9))
+```
+
+```{r}
+DimPlot(screp,group.by = "RNA_snn_res.0.4")
+```
+
+```{r}
+colnames(screp@meta.data)
+```
+## re-process
+
+```{r}
+screp <- NormalizeData(screp,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+screp <- FindVariableFeatures(object = screp, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+VariableFeatures(screp) <-  VariableFeatures(screp) [!grepl("^Tra|^Trab|^Igh|^Igk|Mamu-a", VariableFeatures(screp))]
+VariableFeaturePlot(screp,selection.method = "mean.var.plot")
+
+screp <- ScaleData(object = screp, features = VariableFeatures(object = screp), vars.to.regress = c("nCount_RNA", "percent.mt"))
+screp <- RunPCA(object = screp,
+                features =  VariableFeatures(object = screp),
+                dims = 1:50)
+gc()
+
+ElbowPlot(screp,ndims = 50)
+```
+
+```{r}
+screp <- RunHarmony(object = screp, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+screp <- RunUMAP(screp,dims = 1:30,reduction = "harmony")
+screp <- RunTSNE(screp,dims = 1:30,reduction = "harmony")
+
+screp <- FindNeighbors(screp, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  screp <- FindClusters(object = screp, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+
+```
+
+```{r}
+DimPlot(screp,group.by = "RNA_snn_res.0.4")
+```
+
+
+# scRep
+
+```{r}
+DimPlot(screp, group.by = "cloneType")
+```
+```{r}
+slot(screp, "meta.data")$cloneType <- factor(slot(screp, "meta.data")$cloneType, 
+                levels = c("Hyperexpanded (100 < X <= 500)", 
+                           "Large (20 < X <= 100)", 
+                           "Medium (5 < X <= 20)", 
+                           "Small (1 < X <= 5)", 
+                           "Single (0 < X <= 1)", "NA"))
+```
+
+```{r}
+DimPlot(screp, group.by = "cloneType",split.by = "orig.ident")
+```
+
+
+```{r}
+save(screp,file = "../V2_processing_analysis/R_outs/lymphoid_convT_V3_merged_scRep.Robj")
+```
+
+```{r}
+load("../V2_processing_analysis/R_outs/lymphoid_convT_V3_merged_scRep.Robj")
+```
+
+```{r}
+Idents(screp) <- "RNA_snn_res.0.4"
+DimPlot(screp,group.by = "RNA_snn_res.0.4")
+FeaturePlot(screp,features = c("nFeature_RNA_log10"),label = T)
+FeaturePlot(screp,features = c("nCount_RNA_log10"),label = T)
+VlnPlot(screp,features = c("nCount_RNA_log10","nFeature_RNA_log10"),group.by = "RNA_snn_res.0.4")
+VlnPlot(screp,features = c("nCount_RNA_log10","nFeature_RNA_log10"),group.by = "RNA_snn_res.0.8")
+```
+
+remove cluster 6 at resolution of 0.4
+
+```{r}
+Idents(screp) <- "RNA_snn_res.0.4"
+screp <- subset(screp,idents = c(0:5,7:9))
+```
+
+```{r}
+VlnPlot(screp,features = c("nCount_RNA_log10","nFeature_RNA_log10"),group.by = "RNA_snn_res.0.4")
+VlnPlot(screp,features = c("nCount_RNA_log10","nFeature_RNA_log10"),group.by = "RNA_snn_res.0.8")
+```
+
+```{r}
+screp <- NormalizeData(screp,assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+screp <- FindVariableFeatures(object = screp, selection.method = 'mean.var.plot', mean.cutoff = c(0.025, 5), dispersion.cutoff = c(0.55, Inf))
+VariableFeatures(screp) <-  VariableFeatures(screp) [!grepl("^Tra|^Trab|^Igh|^Igk|Mamu-a", VariableFeatures(screp))]
+VariableFeaturePlot(screp,selection.method = "mean.var.plot")
+
+screp <- ScaleData(object = screp, features = VariableFeatures(object = screp), vars.to.regress = c("nCount_RNA", "percent.mt"))
+screp <- RunPCA(object = screp,
+                features =  VariableFeatures(object = screp),
+                dims = 1:50)
+gc()
+
+ElbowPlot(screp,ndims = 50)
+
+screp <- RunHarmony(object = screp, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+screp <- RunUMAP(screp,dims = 1:30,reduction = "harmony")
+screp <- RunTSNE(screp,dims = 1:30,reduction = "harmony")
+
+screp <- FindNeighbors(screp, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  screp <- FindClusters(object = screp, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+screp <- JoinLayers(screp)
+```
+
+```{r}
+VlnPlot(screp,features = c("nCount_RNA_log10","nFeature_RNA_log10"),group.by = "RNA_snn_res.0.4")
+VlnPlot(screp,features = c("nCount_RNA_log10","nFeature_RNA_log10"),group.by = "RNA_snn_res.0.8")
+```
+```{r}
+DimPlot(screp,group.by = "RNA_snn_res.0.4")
+FeaturePlot(screp,features = c("nFeature_RNA_log10"),label = F)
+FeaturePlot(screp,features = c("nCount_RNA_log10"),label = F)
+```
+
+```{r}
+DimPlot(screp, group.by = "cloneType")
+```
+```{r}
+screp@meta.data[,c("CTgene","CTnt","CTaa","CTstrict","cloneType")] <- screp@meta.data[,c("CTgene","CTnt","CTaa","CTstrict","cloneType")] %>% 
+  replace_na(
+  list(CTgene = "NA",
+  CTnt = "NA",
+  CTaa = "NA",
+  CTstrict = "NA",
+  cloneType = "NA"
+  )
+  )
+```
+
+```{r}
+table(screp$cloneType)
+```
+
+```{r}
+save(screp,file = "../V2_processing_analysis/R_outs/lymphoid_convT_V3p1_merged_scRep.Robj")
+```
+
+
+## generate TCR processed data again
+
+```{r}
+outdir <- "TCR_outs/"
+```
+
+```{r}
+samples <- list.files(path = "VDJ")
+```
+
+```{r}
+contig_files <- paste("VDJ",samples,"filtered_contig_annotations.csv",sep = "/")
+```
+
+```{r}
+contig_list <- lapply(as.list(contig_files), read.csv)
+names(contig_list) <- samples
+```
+
+```{r}
+combined <- combineTCR(contig_list,
+                        samples = samples)
+```
+
+```{r}
+quantContig(combined,
+            cloneCall="strict",
+            chain = "both",
+            scale = TRUE)
+```
+
+
+
+## visualization
+
+
+
+```{r}
+clonalOverlay(screp, 
+              reduction = "umap",
+              cutpoint = 1,
+              bins = 10,
+              cut.category = "Frequency",
+              facet = "orig.ident") + 
+              guides(color = "none")
+```
+
+```{r}
+g <- clonalOverlay(screp, 
+              reduction = "umap",
+              cutpoint = 1,
+              bins = 10,
+              cut.category = "Frequency",
+              facet = "orig.ident") + 
+              guides(color = "none")
+ggsave("TCR_outs/clonalOverlay_V3p1.pdf",width = 10,height = 10)
+```
+
+
+
+```{r}
+clonalNetwork(screp, 
+              reduction = "umap", 
+              identity = "celltype",
+              filter.clones = NULL,
+              filter.identity =  c("CD8T"),
+              cloneCall = "gene")
+```
+
+

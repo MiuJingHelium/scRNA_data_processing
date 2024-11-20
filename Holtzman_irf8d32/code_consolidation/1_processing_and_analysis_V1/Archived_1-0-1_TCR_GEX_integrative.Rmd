@@ -1,0 +1,385 @@
+---
+title: "TCR_GEX_integration"
+output: html_document
+---
+
+```{r}
+library(Seurat)
+library(dplyr)
+library(data.table)
+library(ggplot2)
+library(RColorBrewer)
+library(immunarch)
+library(gridExtra)
+library(ggrepel)
+library(kableExtra)
+#tcR is no longer maintained and available. immunarch is used instead.
+```
+
+```{r helper functions}
+#' Clean contig annotation file for merging with clonotype file
+#' 1) remove columns that are not useful
+#' 2) remove "-1" in barcode name
+#' 
+#' @param contig.ann - filtered_contig_annotations.csv
+
+#Things have changed. now they have "TRUE" for productive column
+process.sample <- function(contig.ann) {
+  ann <- fread(contig.ann) %>%
+    dplyr::filter(productive == "TRUE") %>%
+    dplyr::select(-contig_id, -raw_consensus_id, -full_length, -is_cell, -high_confidence, -productive) %>%
+    dplyr::rename(clonotype_id = "raw_clonotype_id") %>%
+    mutate(barcode = gsub("-1", "", barcode))
+  ann
+}
+
+#' Clean contig annotation file for merging with clonotype file
+#' 1) For each chain, parse gene names, if there are multiple matches, take the most probable (first)
+#' 2) remove redundunt fields
+#' 
+#' @param clonotype.file - clonotypes.csv 
+#' @param consensus.ann.file consensus_annotations.csv
+annotate.clonotypes <- function(clonotype.file, consensus.ann.file) {
+  ## how to add gene information to clonotypes
+  clonotypes <- fread(clonotype.file)
+  consensus <- fread(consensus.ann.file) %>%
+    select(-full_length, - productive, -cdr3,  -cdr3_nt,-reads, -umis, -length)
+  
+  consensus.a <- consensus[grepl("TRA", consensus$chain),] %>%
+    select(-chain, -consensus_id) %>%
+    dplyr::group_by(clonotype_id) %>%
+    mutate(TRAV = gsub(",$", "", paste0(unique(v_gene), collapse =",")),
+           TRAJ = gsub(",$", "", paste0(unique(j_gene), collapse =",")),
+           TRAC = gsub(",$", "", paste0(unique(c_gene), collapse =","))) %>%
+    select(-v_gene, -j_gene, -c_gene, -d_gene) %>%
+    distinct()
+  
+  consensus.b <- consensus[grepl("TRB", consensus$chain),] %>%
+    select(-chain, -consensus_id) %>%
+    dplyr::group_by(clonotype_id) %>%
+    mutate(TRBV = gsub(",$", "", paste0(unique(v_gene), collapse =",")),
+           TRBD = gsub(",$", "", paste0(unique(d_gene), collapse =",")),
+           TRBJ = gsub(",$", "", paste0(unique(j_gene), collapse =",")),
+           TRBC = gsub(",$", "", paste0(unique(c_gene), collapse =","))) %>%
+    select(-v_gene, -j_gene, -c_gene, -d_gene) %>%
+    distinct()
+    x <- merge(merge(clonotypes, consensus.a, all = T), consensus.b, all = T) %>%
+    select(-TRAC, -TRBC)
+  
+  data.frame(x)
+}
+```
+
+## TCR-seq QC
+
+```{r}
+sample_dir <- list.files(path="./",pattern = "SR003099_",full.names = T)
+tcr_dir <- paste(sample_dir,"outs/per_sample_outs/vdj_t",sep = "/") #define the tcr seq directory
+```
+
+```{r}
+seu_dir <- "./R_outs/"
+load(paste0(seu_dir,"whole_processed_wHarmony.Robj"))#load seurat object
+```
+
+```{r}
+scn_path <- "./scn"
+outdir <- "./R_outs/"
+result <- jsonlite::fromJSON(file.path(scn_path,"exp_data.json"))
+total_counts <- result$totalCounts
+data_ <- rhdf5::h5read(file.path(scn_path,"data.h5"),"X")
+dims_ <- rhdf5::h5readAttributes(file = file.path(scn_path,"data.h5"), 
+                                 name = "X")$shape
+expData <- Matrix::sparseMatrix(p = data_$indptr, j = data_$indices, 
+                                x = as.numeric(data_$data), 
+                                dimnames = list(result$features, result$barcodes),
+                                dims=c(dims_[2],dims_[1]), repr="C", index1=FALSE)
+```
+
+```{r}
+# my object is integrated with cell id prefixed by sample id
+# the cell ids are the barcodes
+# they can be extracted either from expData created as above or directly from colnames
+# you need to remove the sample id from the cell name
+# for some wicked reasons, I have different sep for the sample id and the one used for the cell names :(. 
+# It would make your life much more easier if you keep everything consistent and minimize the use of seperators
+# tcr.present <- gsub(paste(paste0(gsub("-","_",samples),"_"),collapse = "|"),"",expData@Dimnames[[2]])
+# replace "-" by "_". Then append "_". Collapse by "|" so that we can look for multiple patterns. Replace the list of patterns by space. 
+# Now we should have the cell ids.
+tcr.present <- expData@Dimnames[[2]]
+tcr.present <- gsub("-1", "", tcr.present)
+```
+
+```{r}
+samples <-  c("NT_C","NT_KO","T_C","T_KO") # the automated way is not working well here. I'll use list files instead or manually enter the sample id
+# the sample id should match the prefix of the cell ids
+```
+
+```{r}
+# unless the directories are organized in accordance to the demo code
+# changing the codes need to be adjusted for the actual run
+# the samples can be hard to grep because of overlapping names
+# instead of concatenating the sample names with the directory, I'll use the directory directly.
+n_sample = length(samples)
+for (i in 1:n_sample) {
+  dir <- tcr_dir[i]
+  item <- samples[i]
+  # Clean contig annotation file for merging with clonotype file
+  contigs.tcr <- process.sample(paste(dir, "/filtered_contig_annotations.csv", sep = "")) %>%
+    mutate(Sample = item,
+           barcode = paste(item, "_", gsub("-1", "", barcode), sep = ""))
+  #I removed the 
+  # add gene information to clonotypes
+  clons.tcr.annot <- annotate.clonotypes(paste(dir, "/clonotypes.csv", sep = ""), 
+                                         paste(dir, "/consensus_annotations.csv", sep = "")) 
+  
+  # Remove TCR that do not have confirmed GEX cells
+  contigs.tcr <- contigs.tcr[contigs.tcr$barcode %in% tcr.present,]
+  clons.tcr.annot <- clons.tcr.annot[clons.tcr.annot$clonotype_id %in% contigs.tcr$clonotype_id,]
+
+  # re-count frequency based on presence
+  freq.tcr  <- contigs.tcr %>%
+    select(clonotype_id, barcode) %>%
+    distinct() %>%
+    group_by(clonotype_id) %>%
+    tally() %>%
+    dplyr::rename(frequency = "n")
+  
+  clons.tcr.annot$frequency <- NULL
+  clons.tcr.annot <- merge(clons.tcr.annot, freq.tcr)
+  clons.tcr.annot <- clons.tcr.annot[,c("clonotype_id", "frequency", "TRAV", "TRAJ", "TRBV", "TRBD", "TRBJ", "cdr3s_aa", "cdr3s_nt")] %>%
+    arrange(desc(frequency))
+  
+  # Put corect name for clonotype_id column
+  clons.tcr.annot$clonotype_id <- gsub("clonotype", paste(item, "_", sep = ""), clons.tcr.annot$clonotype_id)
+  colnames(clons.tcr.annot)[colnames(clons.tcr.annot) == "frequency"] <- paste(item, "freq", sep = "_")
+  colnames(clons.tcr.annot)[colnames(clons.tcr.annot) == "clonotype_id"] <- paste(item, "id", sep = "_")
+  
+  contigs.tcr$clonotype_id <- gsub("clonotype", paste(item, "_", sep = ""), contigs.tcr$clonotype_id)
+  
+  # Add to common table
+  if (item == samples[1]) {
+    table.annot <- clons.tcr.annot
+    table.tcr <- contigs.tcr
+  } else {
+    table.annot <- merge(table.annot, clons.tcr.annot, all.x = T, all.y = T)
+    table.tcr <- rbind(table.tcr, contigs.tcr)
+  }
+  
+}
+```
+
+```{r}
+
+# if clonotype is present in one sample and absent in other, add 0 to frequency and "-" to clonotype id for this sample
+table.annot$N_C_freq[is.na(table.annot$NT_C_freq)] <- 0
+table.annot$NT_KO_freq[is.na(table.annot$NT_KO_freq)] <- 0
+table.annot$T_C_freq[is.na(table.annot$T_C_freq)] <- 0
+table.annot$T_KO_freq[is.na(table.annot$T_KO_freq)] <- 0
+
+table.annot[is.na(table.annot)] <- "-"
+table.tcr[is.na(table.tcr)] <- "-"
+
+
+# sort clonotypes by one column (looks prettier)
+# I chose the tau APOE + Irf8d32 KO
+
+table.annot <- table.annot[order(table.annot$T_KO_freq, decreasing = T),] %>%
+  select(-cdr3s_nt)
+
+
+
+# this two files have to be added to TCR explorer
+write.table(table.tcr, paste(outdir, "/clonotypes.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+write.table(table.annot, paste(outdir, "/clonotypes_summary.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+```
+
+
+## population assignment
+
+```{r}
+library(dplyr)
+library(data.table)
+library(tidyr)
+library(ggplot2)
+library(RColorBrewer)
+library(ggrepel)
+library(kableExtra)
+library(ggseqlogo)
+library(stringr)
+library(gridExtra)
+library(ggpubr)
+library(grid)
+```
+
+```{r}
+## extending palette beyond 9 colors
+getPalette.1 <- colorRampPalette(brewer.pal(9, "Set1"))
+
+indir <- "./R_outs/"
+outdir <- "./R_outs/"
+```
+
+```{r}
+scn_path <- "./scn"
+result <- jsonlite::fromJSON(file.path(scn_path,"exp_data.json"))
+total_counts <- result$totalCounts
+data_ <- rhdf5::h5read(file.path(scn_path,"data.h5"),"X")
+dims_ <- rhdf5::h5readAttributes(file = file.path(scn_path,"data.h5"), 
+                                 name = "X")$shape
+expData <- Matrix::sparseMatrix(p = data_$indptr, j = data_$indices, 
+                                x = as.numeric(data_$data), 
+                                dimnames = list(result$features, result$barcodes),
+                                dims=c(dims_[2],dims_[1]), repr="C", index1=FALSE)
+```
+
+```{r}
+#load metadata
+meta <- (jsonlite::fromJSON(file.path(scn_path,"plot_data.json"))$data) %>% 
+  as.data.frame() 
+```
+
+```{r}
+meta <- meta %>% mutate(barcode = gsub("-1","",rownames(meta)))
+```
+
+
+```{r}
+clons.bycell <- fread(paste(indir, "/clonotypes.txt", sep = "")) 
+```
+
+```{r}
+expr <- as.data.frame(t(as.matrix(expData[c("Cd3e","Cd4", "Cd8a", "Cd8b1", "Foxp3", "Cd7"),]))) %>%
+  tibble::rownames_to_column(var = "barcode") %>%
+  mutate(barcode =  gsub("-1","",barcode))
+  
+## add expression information to cell-clonotype table and meta
+clons.bycell <- merge(merge(clons.bycell, meta[, c("barcode", "Cluster")]), expr)
+meta <- merge(meta, expr)
+```
+
+```{r}
+res <- data.frame(stat_name = character(), number = numeric(), stringsAsFactors = F)
+res[nrow(res) + 1,] <- c("Total number of cells", nrow(meta))
+
+x <- clons.bycell %>%
+  group_by(clonotype_id, Cd8a, Cd8b1, Cd4, Foxp3, barcode, chain) %>%
+  tally(name = "n_chain") %>%
+  ungroup() %>%
+  spread(chain, n_chain, fill = 0)
+# Multi does not exist, so this line of code is removed.
+
+## Number of cells with TCR out of all GEX cells
+res[nrow(res) + 1,] <- c("Number of cells with TCR", nrow(x))
+
+## number of unique clonotypes
+length(unique(x$clonotype_id))
+res[nrow(res) + 1,] <- c("Number of unique clonotypes", length(unique(x$clonotype_id)))
+
+## theshold of expression for gene-based assignments
+thresh <- 0.5
+
+## find CD8+ cells
+## they should express CD8 (a or b1 for mouse) and not CD4
+cd8 <- x %>% filter((Cd8a > thresh | Cd8b1 > thresh) & Cd4 < thresh )
+res[nrow(res) + 1,] <- c("Number of CD8", nrow(cd8))
+res[nrow(res) + 1,] <- c("Number of CD8 with 1 chain", nrow(cd8 %>% filter(TRA == 1 & TRB == 0 | TRA == 0 & TRB == 1)))
+res[nrow(res) + 1,] <- c("Number of CD8 with TCRa & TCRb", nrow(cd8 %>% filter(TRA == 1 & TRB == 1)))
+res[nrow(res) + 1,] <- c("Number of CD8 with > 2 chains", nrow(cd8 %>% filter(TRA > 1 | TRB > 1)))
+
+
+# find CD4+ cells
+cd4 <- x %>% filter(Cd8a < thresh & Cd4 > thresh )
+res[nrow(res) + 1,] <- c("Number of CD4", nrow(cd4))
+res[nrow(res) + 1,] <- c("Number of CD4 with 1 chain", nrow(cd4 %>% filter(TRA == 1 & TRB == 0 | TRA == 0 & TRB == 1)))
+res[nrow(res) + 1,] <- c("Number of CD4 with TCRa & TCRb", nrow(cd4 %>% filter(TRA == 1 & TRB == 1)))
+res[nrow(res) + 1,] <- c("Number of CD4 with > 2 chains", nrow(cd4 %>% filter(TRA > 1 | TRB > 1)))
+
+res %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+```{r}
+clons.bycell$type <- ""
+clons.bycell$type[clons.bycell$clonotype_id %in% cd4$clonotype_id] <- 'cd4'
+clons.bycell$type[clons.bycell$clonotype_id %in% cd8$clonotype_id] <- 'cd8'
+```
+
+
+```{r}
+for (item in intersect(cd8$clonotype_id, cd4$clonotype_id)) {
+  ncells.cd4 <- nrow(cd4 %>% filter(clonotype_id == item))
+  ncells.cd8 <- nrow(cd8 %>% filter(clonotype_id == item))
+  print(paste(item, ncells.cd8, ncells.cd4))
+  
+  if (ncells.cd4 > ncells.cd8) {
+    clons.bycell$type[clons.bycell$clonotype_id == item] <- 'cd4'
+  } else {
+    clons.bycell$type[clons.bycell$clonotype_id == item] <- 'cd8'
+  }
+}
+```
+```{r}
+meta$Cluster <- factor(meta$Cluster, levels = sort(unique(meta$Cluster)))
+
+centers <- meta %>% 
+  dplyr::group_by(Cluster) %>% 
+  dplyr::summarize(umap_1 = median(umap_1), umap_2 = median(umap_2)) 
+
+## clustering
+p1 <- ggplot(meta, aes(x = umap_1, y = umap_2, color = Cluster, label = Cluster)) +
+  geom_point(size = 0.5) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        panel.grid = element_blank()) +
+  scale_color_manual(values = getPalette.1(length(unique(meta$Cluster))), guide = F) +
+   geom_text(data = centers, aes(label=Cluster), size = 5, color = "black") +
+  ggtitle("Clustering")
+## expression plots
+p2 <- ggplot(meta, aes(x = umap_1, y = umap_2, color = Cd4)) +
+  geom_point(size = 0.5) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        panel.grid = element_blank()) +
+  scale_color_gradientn(colours  = c("grey88", "red", "red"), guide = F) +
+  ggtitle("Cd4 expression")
+  
+p3 <- ggplot(meta, aes(x = umap_1, y = umap_2, color = Cd8b1)) +
+  geom_point(size = 0.5) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        panel.grid = element_blank()) +
+  scale_color_gradientn(colours  = c("grey88", "red", "red"), guide = F) +
+  ggtitle("Cd8b1 expression")
+
+p4 <- ggplot(meta, aes(x = umap_1, y = umap_2, color = Cd7)) +
+  geom_point(size = 0.5) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        panel.grid = element_blank()) +
+  scale_color_gradientn(colours  = c("grey88", "red", "red"), guide = F) +
+  ggtitle("Cd7 expression")
+p <- grid.arrange(grobs = list(p1, p2, p3, p4), ncol = 4)
+
+p
+```
+```{r}
+pdf(paste0(outdir,"/T_marker_expression.pdf"), width = 12, height = 12)
+grid.arrange(grobs = list(p1, p2, p3, p4), ncol = 2)
+dev.off()
+```
+
+Temporarily save the file for future annotation
+```{r eval=F}
+write.table(clons.bycell, paste(outdir, "/clons_bycell.txt", sep = ""), sep = "\t", quote = F, row.names = F)
+```
+
+```{r}
+
+```
+

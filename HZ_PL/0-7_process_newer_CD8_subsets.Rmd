@@ -1,0 +1,145 @@
+---
+title: "0-7_process_newer_CD8_subsets"
+output: html_document
+date: "2024-10-25"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony) # for integration
+```
+
+```{r}
+RDSdir <- "RDS/"
+outdir <- "R_outs/"
+```
+
+
+```{r}
+library(RColorBrewer)
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+```
+
+### c0 subset
+
+
+```{r}
+load(paste0(RDSdir,"T_cells_V1p5_CD8_c0.Robj"))
+```
+
+```{r}
+CD8_c0 <- FindVariableFeatures(object = CD8_c0, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD8_c0) <-  VariableFeatures(CD8_c0) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(CD8_c0))]
+VariableFeaturePlot(CD8_c0)
+
+CD8_c0 <- ScaleData(object = CD8_c0, features = VariableFeatures(object = CD8_c0), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+CD8_c0 <- RunPCA(object = CD8_c0,
+                features =  VariableFeatures(object = CD8_c0),
+                dims = 1:50)
+gc()
+ElbowPlot(CD8_c0,ndims = 50)
+```
+
+```{r}
+CD8_c0 <- RunHarmony(object = CD8_c0, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD8_c0 <- RunUMAP(CD8_c0,dims = 1:20,reduction = "harmony") # use harmony embedding for downstream analysis
+CD8_c0 <- RunTSNE(CD8_c0,dims = 1:20,reduction = "harmony")
+
+CD8_c0 <- FindNeighbors(CD8_c0, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  CD8_c0 <- FindClusters(object = CD8_c0, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+CD8_c0 <- JoinLayers(CD8_c0) # required for seurat V5
+```
+
+
+
+```{r}
+DimPlot(CD8_c0,group.by = "orig.ident",shuffle = T)
+DimPlot(CD8_c0,group.by = "genotype",shuffle = T)
+DimPlot(CD8_c0)
+```
+
+```{r}
+clust_prop <- CD8_c0@meta.data %>% group_by(RNA_snn_res.0.5,genotype) %>% summarise(n = n()) %>% ungroup() %>% group_by(genotype) %>% mutate(percentage = 100*n/sum(n))
+```
+
+```{r}
+ggplot(clust_prop)+
+  geom_bar(aes(x = genotype,y = percentage, fill = RNA_snn_res.0.5),stat = "identity", position = "dodge")+
+  scale_fill_manual(values = pal)+
+  theme_classic()+
+  facet_wrap(~RNA_snn_res.0.5,scales = "free")+
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+
+```{r}
+save(CD8_c0, file = paste0(RDSdir,"T_cells_V1p5_CD8_c0.Robj"))
+```
+
+### CD8 other clusters
+
+```{r}
+load(paste0(RDSdir,"T_cells_V1p5_CD8_2.Robj"))
+```
+
+```{r}
+CD8 <- FindVariableFeatures(object = CD8, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD8) <-  VariableFeatures(CD8) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(CD8))]
+VariableFeaturePlot(CD8)
+
+CD8 <- ScaleData(object = CD8, features = VariableFeatures(object = CD8), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+CD8 <- RunPCA(object = CD8,
+                features =  VariableFeatures(object = CD8),
+                dims = 1:50)
+gc()
+ElbowPlot(CD8,ndims = 50)
+```
+
+```{r}
+CD8 <- RunHarmony(object = CD8, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD8 <- RunUMAP(CD8,dims = 1:30,reduction = "harmony") # use harmony embedding for downstream analysis
+CD8 <- RunTSNE(CD8,dims = 1:30,reduction = "harmony")
+
+CD8 <- FindNeighbors(CD8, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  CD8 <- FindClusters(object = CD8, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+CD8 <- JoinLayers(CD8) # required for seurat V5
+```
+
+```{r}
+DimPlot(CD8,group.by = "orig.ident",shuffle = T)
+DimPlot(CD8,group.by = "genotype",shuffle = T)
+DimPlot(CD8)
+```
+```{r}
+clust_prop <- CD8@meta.data %>% group_by(RNA_snn_res.0.5,genotype) %>% summarise(n = n()) %>% ungroup() %>% group_by(genotype) %>% mutate(percentage = 100*n/sum(n))
+```
+
+```{r}
+ggplot(clust_prop)+
+  geom_bar(aes(x = genotype,y = percentage, fill = RNA_snn_res.0.5),stat = "identity", position = "dodge")+
+  scale_fill_manual(values = pal)+
+  theme_classic()+
+  facet_wrap(~RNA_snn_res.0.5,scales = "free")+
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+```{r}
+save(CD8, file = paste0(RDSdir,"T_cells_V1p5_CD8_2.Robj"))
+```
+
+

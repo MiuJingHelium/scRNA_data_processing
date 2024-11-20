@@ -1,0 +1,204 @@
+---
+title: "integrative analysis"
+output: html_document
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony)
+```
+
+```{r}
+indir = "./R_outs/" #Can be made into a command-line input
+outdir = "./R_outs/"
+```
+
+```{r}
+load(paste0(outdir,"whole.Robj"))
+```
+
+## run the usual pipeline
+
+```{r}
+table(whole@meta.data$orig.ident)
+```
+
+```{r}
+ggplot(whole@meta.data)+
+  geom_histogram(aes(x=percent.mt,y = after_stat(width*density*100)),bins = 100)+
+  facet_wrap(vars(orig.ident),ncol=1)+
+  geom_vline(xintercept = 5,col="red") +
+  ylab("proportion")+
+  xlab("percentage of mitochondrial RNA")
+```
+
+```{r}
+ggplot(whole@meta.data, aes(x = log10(nFeature_RNA))) +
+  geom_histogram(bins = 100, aes(y = after_stat(width*density*100))) +
+  theme_classic() +
+  facet_wrap(~orig.ident, ncol = 1) +
+  geom_vline(xintercept = 2.5,col="red") + 
+  geom_vline(xintercept = 4,col="red") + 
+  ggtitle("nGene") +
+  ylab("")
+```
+
+```{r}
+ggplot(whole@meta.data, aes(x = log10(nCount_RNA))) +
+  geom_histogram(bins = 100, aes(y = after_stat(width*density*100))) +
+  theme_classic() +
+  facet_wrap(~orig.ident, ncol = 1) +
+  geom_vline(xintercept = 2.5,col="red") + 
+  geom_vline(xintercept = 4.5,col="red") + 
+  ggtitle("nCount") +
+  ylab("")
+```
+
+
+```{r}
+#whole <- NormalizeData(object = whole, normalization.method = "LogNormalize", scale.factor = 10000)
+#there is no need to normalize again; normalization is cell specific
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(whole) <-  VariableFeatures(whole) [!grepl("^TRA|^TRB|^IGH|^IGK|MAMU-A", VariableFeatures(whole))]
+VariableFeaturePlot(whole)
+```
+
+
+```{r}
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+```
+
+```{r}
+DimPlot(whole, reduction = "pca",group.by = "orig.ident",dims = c(3,4),shuffle = T)
+```
+
+
+```{r}
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+whole <- RunUMAP(whole,dims = 1:20,reduction = "harmony")
+whole <- RunTSNE(whole,dims = 1:20,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+
+```{r}
+DimPlot(whole, reduction = "umap",group.by = "orig.ident",shuffle = T)
+```
+
+```{r}
+DimPlot(whole, reduction = "umap",group.by = "RNA_snn_res.0.1")
+```
+
+```{r}
+FeaturePlot(whole,features = c("Cd8a"))
+```
+
+```{r}
+DimPlot(whole, reduction = "umap")
+```
+
+
+```{r}
+FeaturePlot(whole,features = c("Cd8a"))
+```
+
+```{r}
+DimPlot(whole, reduction = "umap",group.by = "miQC.keep",shuffle = T)
+```
+
+
+```{r}
+DotPlot(whole,features = c("Cd3e","Cd8a","Cd4","Cd19","Cd44","Ncam1","Xcr1","Ncr1","Siglech","S100a8","Ccr2","Fcer1a","Fcer2a","Flt3"),group.by = "RNA_snn_res.0.1")+RotatedAxis()
+```
+```{r}
+DotPlot(whole,features = c("Cd3e","Cd8a","Cd4","Cd19","Cd44","Ncam1","Xcr1","Ncr1","Siglech","S100a8","Ccr2","Fcer1a","Fcer2a","Flt3"),group.by = "orig.ident")+RotatedAxis()
+```
+
+```{r}
+bulk <- AggregateExpression(whole,group.by = "orig.ident", return.seurat = TRUE)
+Cells(bulk)
+```
+
+```{r}
+DotPlot(bulk,features = c("Cd3e","Cd8a","Cd4","Cd19","Cd44","Ncam1","Xcr1","Ncr1","Siglech","S100a8","Ccr2","Fcer1a","Fcer2a","Flt3"))+RotatedAxis()
+```
+```{r}
+whole <- JoinLayers(whole) #This is seurat 5 specific
+```
+
+
+```{r eval=F}
+save(whole,file = paste0(outdir,"whole_processed_wHarmony.Robj"))
+```
+
+## Jan 5 processing by further trimming down to miQC.keep
+
+```{r}
+whole <- subset(whole, subset = miQC.keep=="keep")
+```
+
+
+```{r}
+table(whole$miQC.keep)
+```
+
+
+```{r}
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(whole) <-  VariableFeatures(whole) [!grepl("^TRA|^TRB|^IGH|^IGK|MAMU-A", VariableFeatures(whole))]
+VariableFeaturePlot(whole)
+
+```
+
+```{r}
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+```
+
+```{r}
+DimPlot(whole, reduction = "pca",group.by = "orig.ident",dims = c(3,4),shuffle = T)
+```
+
+
+```{r}
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+whole <- RunUMAP(whole,dims = 1:20,reduction = "harmony")
+whole <- RunTSNE(whole,dims = 1:20,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DimPlot(whole, reduction = "umap",group.by = "orig.ident",shuffle = T)
+DimPlot(whole, reduction = "umap",group.by = "RNA_snn_res.0.1")
+DimPlot(whole, reduction = "umap")
+```
+
+```{r}
+DotPlot(whole,features = c("Cd3e","Cd8a","Cd4","Cd19","Cd44","Ncam1","Xcr1","Ncr1","Siglech","S100a8","Ccr2","Fcer1a","Fcer2a","Flt3"),group.by = "RNA_snn_res.0.1")+RotatedAxis()
+DotPlot(whole,features = c("Cd3e","Cd8a","Cd4","Cd19","Cd44","Ncam1","Xcr1","Ncr1","Siglech","S100a8","Ccr2","Fcer1a","Fcer2a","Flt3"),group.by = "orig.ident")+RotatedAxis()
+```
+
+```{r}
+save(whole, file = paste0(outdir,"whole_processed_wHarmony_miQC.Robj"))
+```
+

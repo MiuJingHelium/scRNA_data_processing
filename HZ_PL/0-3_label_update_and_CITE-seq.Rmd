@@ -1,0 +1,168 @@
+---
+title: "0-3_label_update_and_CITE-seq"
+output: html_document
+date: "2024-08-30"
+---
+
+```{r message=FALSE}
+library(Seurat)
+library(tidyverse)
+library(miQC)
+library(SeuratWrappers) # for miQC
+library(harmony) # for integration
+```
+
+```{r}
+# template palette for > 40 labels
+library(RColorBrewer)
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+```
+
+```{r}
+RDSdir <- "RDS/"
+outdir <- "R_outs/"
+```
+
+# load whole and T cell objects to update condition label
+
+```{r}
+load(paste0(RDSdir,"whole_V1p2.Robj"))
+load(paste0(RDSdir,"T_cells_V1p3.Robj"))
+```
+
+```{r}
+table(whole$orig.ident)
+```
+
+
+```{r}
+# only merge FE4 and TFE4 sub-samples; keep everything else as orig.ident
+whole@meta.data <- whole@meta.data %>% mutate(
+  genotype = case_match(
+    orig.ident,
+    "FE4.01" ~ "FE4",
+    "FE4.02" ~ "FE4",
+    "TFE4.01" ~ "TFE4",
+    "TFE4.02" ~ "TFE4",
+    .default = orig.ident
+  )
+)
+
+T_cells@meta.data <- T_cells@meta.data %>% mutate(
+  genotype = case_match(
+    orig.ident,
+    "FE4.01" ~ "FE4",
+    "FE4.02" ~ "FE4",
+    "TFE4.01" ~ "TFE4",
+    "TFE4.02" ~ "TFE4",
+    .default = orig.ident
+  )
+)
+```
+
+
+```{r}
+# sanity check
+table(whole$genotype)
+table(T_cells$genotype)
+```
+
+```{r eval=FALSE}
+save(whole,file = paste0(RDSdir,"whole_V1p2.Robj"))
+save(T_cells,file = paste0(RDSdir,"T_cells_V1p3.Robj"))
+```
+
+## update plots
+
+```{r}
+prop_table <- T_cells@meta.data %>% group_by(genotype,RNA_snn_res.0.1) %>% summarise(cluster_size= n()) %>% ungroup() %>% group_by(genotype) %>% mutate(proportion = 100*cluster_size/sum(cluster_size))
+
+g <- ggplot(prop_table)+
+  geom_bar(aes(x = genotype, y = proportion, fill = RNA_snn_res.0.1), stat = "identity",position = "stack")+scale_fill_manual(values = pal)+theme_classic()
+g
+ggsave(paste0(outdir,"T_cells_V1p3_res01_proportion_stack.pdf"),width = 10, height = 6)
+
+
+
+g <- ggplot(prop_table)+
+  geom_bar(aes(x = genotype, y = proportion, fill = RNA_snn_res.0.1), stat = "identity",position = "dodge")+scale_fill_manual(values = pal)+facet_wrap(~RNA_snn_res.0.1,scales = "free")+theme_classic()+theme(axis.text.x = element_text(angle = 90))
+g
+ggsave(paste0(outdir,"T_cells_V1p3_res01_proportion_dodge.pdf"),width = 15,height = 10)
+```
+
+```{r}
+write.table(prop_table,paste0(outdir,"T_cells_V1p3_res01_proportion_table.tsv"),sep = "\t",col.names = T,row.names = F)
+```
+
+# process CITE-seq: Tryb gating
+
+```{r}
+CITE_mat <- data.frame(t(T_cells@assays$ADT@layers$data))
+rownames(CITE_mat) <- colnames(T_cells)
+colnames(CITE_mat) <- rownames(T_cells@assays$ADT@features)
+```
+
+```{r warning=FALSE,message=FALSE}
+ggplot(CITE_mat)+
+  geom_histogram(aes(x = CD3))+xlim(c(0,2))
+```
+
+Try 0.5 as the threshold for CD3
+
+```{r warning=FALSE,message=FALSE}
+ggplot(CITE_mat)+
+  geom_histogram(aes(x = NK1.1))+xlim(c(0,2))
+```
+Also looks like 0.5;
+Try making a panel of plots
+
+```{r warning=FALSE,message=FALSE}
+Proteins <- rownames(T_cells@assays$ADT@features)
+glist <- lapply(Proteins, function(i){
+  ggplot(CITE_mat)+
+    geom_histogram(aes(x = CITE_mat[,i]))+xlim(c(0,2))+xlab(i)
+})
+g <- gridExtra::grid.arrange(grobs = glist, ncol = 4)
+ggsave(paste0(outdir,"/T_cells_CITE-seq_hist_lim02.pdf"),plot = g, width = 8,height = 16)
+```
+
+```{r warning=FALSE,message=FALSE}
+Proteins <- rownames(T_cells@assays$ADT@features)
+glist <- lapply(Proteins, function(i){
+  ggplot(CITE_mat)+
+    geom_histogram(aes(x = CITE_mat[,i]))+xlab(i)
+})
+g <- gridExtra::grid.arrange(grobs = glist, ncol = 4)
+ggsave(paste0(outdir,"/T_cells_CITE-seq_hist.pdf"),plot = g, width = 16,height = 16)
+```
+
+
+
+```{r}
+T_cells$CD3_level <- case_when(
+                              CITE_mat$CD3 > 0.5 ~ "CD3+",
+                               .default = "CD3-")
+T_cells$NK1.1_level <- case_when(
+                              CITE_mat$NK1.1 > 0.6 ~ "NK1.1+",
+                               .default = "NK1.1-")
+```
+
+```{r}
+table(T_cells$CD3_level)
+table(T_cells$NK1.1_level)
+```
+
+
+```{r}
+DimPlot(T_cells,group.by = "CD3_level",shuffle = T) | FeaturePlot(T_cells,features = "Cd3e")
+DimPlot(T_cells,group.by = "NK1.1_level",shuffle = T) | FeaturePlot(T_cells,features = "Klrb1c")
+```
+

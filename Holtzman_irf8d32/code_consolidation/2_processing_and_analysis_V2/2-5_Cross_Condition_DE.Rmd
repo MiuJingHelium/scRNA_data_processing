@@ -1,0 +1,93 @@
+---
+title: "CD4 and CD8 cond DE analysis"
+output: html_document
+date: "2024-04-12"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(MAST)
+```
+
+```{r}
+indir <- "R_outs/"
+outdir <- "Cross_Cond_DE/"
+dir.create(outdir)
+```
+
+# perform DE for CD8
+
+```{r}
+load(paste0(indir,"lymphoid_conv_CD8_V2p1_merged_scRep.Robj"))
+```
+
+## perform DE using orig.ident as the ident for comparison
+
+
+
+```{r}
+table(CD8$orig.ident)
+```
+
+```{r}
+Idents(CD8) <- "orig.ident"
+NT_C_KO_DE <- FindMarkers(CD8,ident.1 = "NT_C",ident.2 = "NT_KO",test.use = "MAST")
+```
+```{r}
+NT_C_KO_DE$gene <- rownames(NT_C_KO_DE)
+```
+
+
+```{r}
+
+write.table(NT_C_KO_DE,file = paste0(outdir,"CD8_NT_C_vs_NT_KO.tsv"),col.names = T,row.names = F,quote = F,sep = "\t")
+
+```
+
+
+```{r}
+T_C_NT_C_DE <- FindMarkers(CD8,ident.1 = "T_C",ident.2 = "NT_C",test.use = "MAST")
+T_C_NT_C_DE$gene <- rownames(T_C_NT_C_DE)
+write.table(T_C_NT_C_DE,file = paste0(outdir,"CD8_T_C_vs_NT_C.tsv"),col.names = T,row.names = F,quote = F,sep = "\t")
+
+
+T_C_T_KO_DE <- FindMarkers(CD8,ident.1 = "T_C",ident.2 = "T_KO",test.use = "MAST")
+T_C_T_KO_DE$gene <- rownames(T_C_T_KO_DE)
+write.table(T_C_T_KO_DE,file = paste0(outdir,"CD8_T_C_vs_T_KO.tsv"),col.names = T,row.names = F,quote = F,sep = "\t")
+
+T_KO_NT_KO_DE <- FindMarkers(CD8,ident.1 = "T_KO",ident.2 = "NT_KO",test.use = "MAST")
+T_KO_NT_KO_DE$gene <- rownames(T_KO_NT_KO_DE)
+write.table(T_KO_NT_KO_DE,file = paste0(outdir,"CD8_T_KO_vs_NT_KO.tsv"),col.names = T,row.names = F,quote = F,sep = "\t")
+```
+
+
+# perform DE for CD4
+
+```{r}
+load(paste0(indir,"lymphoid_conv_CD4_V2p1_merged_scRep.Robj"))
+```
+
+## perform using MAST over orig.ident
+
+```{r}
+Idents(CD4) <- "orig.ident"
+
+NT_C_KO_DE <- FindMarkers(CD4,ident.1 = "NT_C",ident.2 = "NT_KO",test.use = "MAST")
+NT_C_KO_DE$gene <- rownames(NT_C_KO_DE)
+write.table(NT_C_KO_DE,file = paste0(outdir,"CD4_NT_C_vs_NT_KO.tsv"),col.names = T,row.names = F,quote = F,sep = "\t")
+
+T_C_NT_C_DE <- FindMarkers(CD4,ident.1 = "T_C",ident.2 = "NT_C",test.use = "MAST")
+T_C_NT_C_DE$gene <- rownames(T_C_NT_C_DE)
+write.table(T_C_NT_C_DE,file = paste0(outdir,"CD4_T_C_vs_NT_C.tsv"),col.names = T,row.names = F,quote = F,sep = "\t")
+
+T_C_T_KO_DE <- FindMarkers(CD4,ident.1 = "T_C",ident.2 = "T_KO",test.use = "MAST")
+T_C_T_KO_DE$gene <- rownames(T_C_T_KO_DE)
+write.table(T_C_T_KO_DE,file = paste0(outdir,"CD4_T_C_vs_T_KO.tsv"),col.names = T,row.names = F,quote = F,sep = "\t")
+
+T_KO_NT_KO_DE <- FindMarkers(CD4,ident.1 = "T_KO",ident.2 = "NT_KO",test.use = "MAST")
+T_KO_NT_KO_DE$gene <- rownames(T_KO_NT_KO_DE)
+write.table(T_KO_NT_KO_DE,file = paste0(outdir,"CD4_T_KO_vs_NT_KO.tsv"),col.names = T,row.names = F,quote = F,sep = "\t")
+
+```
+

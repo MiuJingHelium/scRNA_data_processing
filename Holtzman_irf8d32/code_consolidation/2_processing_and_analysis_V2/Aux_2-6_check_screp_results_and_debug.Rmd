@@ -1,0 +1,712 @@
+---
+title: "Check Seurat Objects for SCN"
+output: html_document
+date: "2024-04-08"
+---
+
+```{r}
+library(Seurat)
+library(harmony)
+library(tidyverse)
+```
+
+```{r}
+indir <- "R_outs/"
+outdir <- "R_outs/"
+```
+
+# check lymphoid
+
+```{r}
+load(paste0(outdir,"lymphoid_V2p1_merged.Robj"))
+```
+
+```{r}
+colnames(lymphoid@meta.data)
+```
+remove barcode and pANN
+
+```{r}
+lymphoid$barcodes <- NULL
+lymphoid$pANN_0.25_0.09_122 <- NULL
+lymphoid$pANN_0.25_0.09_163 <- NULL
+lymphoid$pANN_0.25_0.09_328 <- NULL
+lymphoid$pANN_0.25_0.09_384 <- NULL
+lymphoid$miQC.probability <- NULL
+lymphoid$NKT_TCR <- NULL
+lymphoid$CD8_TCR <- NULL
+lymphoid$CD4_TCR <- NULL
+```
+```{r}
+colnames(lymphoid@meta.data)
+```
+
+```{r}
+DimPlot(lymphoid,group.by = "clono_avail")
+DimPlot(lymphoid,group.by = "annotation_prelim")
+DimPlot(lymphoid,group.by = "celltype")
+```
+```{r}
+save(lymphoid,file = paste0(outdir,"lymphoid_V2p1_merged.Robj"))
+```
+
+## check scRep merged lymphoid
+
+```{r}
+load(paste0(outdir,"lymphoid_V2p1_merged_scRep.Robj"))
+```
+
+```{r}
+colnames(screp_lymphoid@meta.data)
+```
+```{r}
+screp_lymphoid$barcodes <- NULL
+screp_lymphoid$pANN_0.25_0.09_122 <- NULL
+screp_lymphoid$pANN_0.25_0.09_163 <- NULL
+screp_lymphoid$pANN_0.25_0.09_328 <- NULL
+screp_lymphoid$pANN_0.25_0.09_384 <- NULL
+screp_lymphoid$miQC.probability <- NULL
+screp_lymphoid$NKT_TCR <- NULL
+screp_lymphoid$CD8_TCR <- NULL
+screp_lymphoid$CD4_TCR <- NULL
+```
+
+```{r}
+colnames(screp_lymphoid@meta.data)
+```
+```{r}
+screp_lymphoid$barcode <- NULL
+```
+
+
+```{r}
+DimPlot(screp_lymphoid,group.by = "clono_avail")
+DimPlot(screp_lymphoid,group.by = "annotation_prelim")
+DimPlot(screp_lymphoid,group.by = "celltype")
+DimPlot(screp_lymphoid,group.by = "cloneType",order = T)
+```
+```{r}
+table(screp_lymphoid$cloneType)
+```
+```{r}
+to_replace <- setNames(as.list(rep("NA",length(22:27))),colnames(screp_lymphoid@meta.data)[22:27])
+to_replace[["Frequency"]] <- 0
+screp_lymphoid$cloneType <- as.character(screp_lymphoid$cloneType)
+screp_lymphoid@meta.data <- screp_lymphoid@meta.data %>% 
+  replace_na(to_replace)
+```
+
+```{r}
+screp_lymphoid$orig.ident <- as.factor(screp_lymphoid$orig.ident)
+screp_lymphoid$clono_avail <- as.factor(screp_lymphoid$clono_avail)
+screp_lymphoid$annotation_prelim <- as.factor(screp_lymphoid$annotation_prelim)
+screp_lymphoid$celltype <- as.factor(screp_lymphoid$celltype)
+screp_lymphoid$cloneType <- as.factor(screp_lymphoid$cloneType)
+```
+
+```{r}
+save(screp_lymphoid,file = paste0(outdir,"lymphoid_V2p1_merged_scRep.Robj"))
+```
+
+
+```{r}
+write.table(screp_lymphoid@meta.data,file = paste0("R_outs/","lymphoid_plotData.tsv"),sep = "\t",col.names = T,row.names = F,quote = F)
+```
+
+
+# conventional T cells
+
+```{r}
+load(paste0(outdir,"lymphoid_convT_V2p1_merged_scRep.Robj"))
+```
+
+```{r}
+colnames(screp@meta.data)
+```
+```{r}
+table(screp$celltype)
+```
+
+```{r}
+DimPlot(screp,group.by = "annotation_prelim")
+DimPlot(screp,group.by = "clono_avail")
+DimPlot(screp,group.by = "cloneType")
+```
+```{r}
+screp$barcode <- NULL
+screp$barcodes <- NULL
+screp$miQC.probability <- NULL
+```
+
+```{r}
+to_replace <- setNames(as.list(rep("NA",length(25:31))),colnames(screp@meta.data)[25:31])
+to_replace[["Frequency"]] <- 0
+screp$cloneType <- as.character(screp$cloneType)
+screp@meta.data <- screp@meta.data %>% 
+  replace_na(to_replace)
+```
+
+```{r}
+head(screp@meta.data)
+```
+
+```{r}
+table(screp$clono_avail)
+```
+```{r}
+screp$orig.ident <- as.factor(screp$orig.ident)
+screp$clono_avail <- as.factor(screp$clono_avail)
+screp$NKT_TCR <- as.factor(screp$NKT_TCR)
+screp$CD8_TCR <- as.factor(screp$CD8_TCR)
+screp$CD4_TCR <- as.factor(screp$CD4_TCR)
+screp$annotation_prelim <- as.factor(screp$annotation_prelim)
+screp$celltype <- as.factor(screp$celltype)
+screp$cloneType <- as.factor(screp$cloneType)
+screp$highlight <- as.factor(screp$highlight)
+```
+
+```{r}
+save(screp,file = paste0(outdir,"lymphoid_convT_V2p1_merged_scRep.Robj"))
+```
+
+
+## isolate CD4
+
+```{r}
+CD4 <- subset(screp,subset = celltype == "CD4T")
+```
+
+```{r}
+CD4 <- NormalizeData(object = CD4, normalization.method = "LogNormalize", scale.factor = 10000)
+CD4 <- FindVariableFeatures(object = CD4, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD4) <-  VariableFeatures(CD4) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(CD4))]
+VariableFeaturePlot(CD4)
+CD4 <- ScaleData(object = CD4, features = VariableFeatures(object = CD4), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD4 <- RunPCA(object = CD4,
+                features =  VariableFeatures(object = CD4),
+                dims = 1:50)
+gc()
+ElbowPlot(CD4,ndims = 50)
+```
+
+
+```{r}
+CD4 <- RunHarmony(object = CD4, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD4 <- RunUMAP(CD4,dims = 1:20,reduction = "harmony")
+CD4 <- RunTSNE(CD4,dims = 1:20,reduction = "harmony")
+
+CD4 <- FindNeighbors(CD4, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1.0, 0.1))  {   
+  CD4 <- FindClusters(object = CD4, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+```{r}
+table(CD4$cloneType)
+```
+```{r}
+table(CD4$celltype)
+```
+
+```{r}
+DimPlot(CD4,group.by = "annotation_prelim")
+DimPlot(CD4,group.by = "cloneType")
+```
+
+```{r}
+CD4 <- JoinLayers(CD4)
+save(CD4,file = paste0(outdir,"lymphoid_conv_CD4_V2p1_merged_scRep.Robj"))
+```
+
+
+## isolate CD8
+
+```{r}
+CD8 <- subset(screp,subset = celltype == "CD8T")
+```
+
+```{r}
+DimPlot(CD8,group.by = "annotation_prelim")
+DimPlot(CD8,group.by = "cloneType")
+```
+```{r}
+CD8@assays$RNA@layers$scale.data.1.1.2.1 <- NULL
+```
+
+
+```{r}
+CD8 <- NormalizeData(object = CD8, normalization.method = "LogNormalize", scale.factor = 10000)
+CD8 <- FindVariableFeatures(object = CD8, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD8) <-  VariableFeatures(CD8) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-A", VariableFeatures(CD8))]
+VariableFeaturePlot(CD8)
+CD8 <- ScaleData(object = CD8, features = VariableFeatures(object = CD8), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD8 <- RunPCA(object = CD8,
+                features =  VariableFeatures(object = CD8),
+                dims = 1:50)
+gc()
+ElbowPlot(CD8,ndims = 50)
+```
+
+```{r}
+CD8 <- RunHarmony(object = CD8, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD8 <- RunUMAP(CD8,dims = 1:20,reduction = "harmony")
+CD8 <- RunTSNE(CD8,dims = 1:20,reduction = "harmony")
+
+CD8 <- FindNeighbors(CD8, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1.0, 0.1))  {   
+  CD8 <- FindClusters(object = CD8, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+DimPlot(CD8,group.by = "annotation_prelim")
+DimPlot(CD8,group.by = "RNA_snn_res.0.5")
+DimPlot(CD8,group.by = "cloneType")
+```
+
+```{r}
+CD8 <- JoinLayers(CD8)
+save(CD8,file = paste0(outdir,"lymphoid_convT_CD8_V2p1_scRep.Robj"))
+```
+
+## check raw CD8
+
+```{r}
+load(paste0(outdir,"lymphoid_convT_CD8_V2p1.Robj"))
+```
+
+```{r}
+colnames(CD8@meta.data)
+```
+
+```{r}
+DimPlot(CD8,group.by = "annotation_prelim")
+DimPlot(CD8,group.by = "RNA_snn_res.0.5")
+```
+## change strategy:
+
+load pre-merging CD4 and CD8 subsets, integrate scRep data results into subset directly
+
+(transferred to scRepertoire Rmd)
+
+```{r}
+load(paste0(outdir,"lymphoid_conv_CD8_V2p1_merged_scRep.Robj"))
+load(paste0(outdir,"lymphoid_conv_CD4_V2p1_merged_scRep.Robj"))
+```
+
+```{r}
+DimPlot(CD8,group.by = "annotation_prelim")
+DimPlot(CD4,group.by = "annotation_prelim")
+```
+```{r}
+colnames(CD8@meta.data)
+colnames(CD4@meta.data)
+```
+```{r}
+CD8$barcode <- NULL
+CD8$barcodes <- NULL
+CD8$miQC.probability <- NULL
+
+CD4$barcode <- NULL
+CD4$barcodes <- NULL
+CD4$miQC.probability <- NULL
+```
+
+```{r}
+colnames(CD8@meta.data)
+```
+```{r}
+to_replace <- setNames(as.list(rep("NA",length(25:30))),colnames(CD8@meta.data)[25:30])
+to_replace[["Frequency"]] <- 0
+CD8$cloneType <- as.character(CD8$cloneType)
+CD8@meta.data <- CD8@meta.data %>% 
+  replace_na(to_replace) 
+```
+
+
+```{r}
+CD8$orig.ident <- as.factor(CD8$orig.ident)
+CD8$clono_avail <- as.factor(CD8$clono_avail)
+CD8$annotation_prelim <- as.factor(CD8$annotation_prelim)
+CD8$celltype <- as.factor(CD8$celltype)
+CD8$cloneType <- as.factor(CD8$cloneType)
+```
+
+```{r}
+save(CD8,file = paste0(outdir,"lymphoid_conv_CD8_V2p1_merged_scRep.Robj"))
+```
+
+```{r}
+CD4$NKT_TCR <- NULL
+CD4$CD4_TCR <- NULL
+CD4$CD8_TCR <- NULL
+colnames(CD4@meta.data)
+```
+
+```{r}
+to_replace <- setNames(as.list(rep("NA",length(22:27))),colnames(CD4@meta.data)[22:27])
+to_replace[["Frequency"]] <- 0
+CD4$cloneType <- as.character(CD4$cloneType)
+CD4@meta.data <- CD4@meta.data %>% 
+  replace_na(to_replace) 
+```
+
+```{r}
+CD4$orig.ident <- as.factor(CD4$orig.ident)
+CD4$clono_avail <- as.factor(CD4$clono_avail)
+CD4$annotation_prelim <- as.factor(CD4$annotation_prelim)
+CD4$celltype <- as.factor(CD4$celltype)
+CD4$cloneType <- as.factor(CD4$cloneType)
+```
+
+```{r}
+save(CD4,file = paste0(outdir,"lymphoid_conv_CD4_V2p1_merged_scRep.Robj"))
+```
+
+# Second Round
+
+Still had problem with lymphoid; previous there were problems with whole datasets.
+
+## lymphoid
+```{r}
+load(paste0(outdir,"lymphoid_V2p1_merged_scRep.Robj"))
+```
+
+```{r}
+DimPlot(screp_lymphoid,group.by = "cloneType")
+DimPlot(screp_lymphoid,group.by = "celltype")
+```
+
+```{r}
+table(screp_lymphoid$cloneType)
+```
+```{r}
+colnames(screp_lymphoid@meta.data)
+```
+```{r}
+table(screp_lymphoid$celltype)
+```
+
+
+```{r}
+screp_lymphoid$clono_avail <- NULL
+```
+
+
+```{r}
+meta <- screp_lymphoid@meta.data
+UMAP <- screp_lymphoid@reductions$umap@cell.embeddings
+TSNE <- screp_lymphoid@reductions$tsne@cell.embeddings
+meta = cbind(UMAP,TSNE,meta)
+```
+
+```{r}
+ggplot(meta,aes(x = umap_1,y=umap_2,color = cloneType))+
+  geom_point()
+```
+
+```{r}
+write.table(meta,file = paste0(outdir,"lymphoid_plotData.tsv"),sep = "\t",col.names = T,row.names = F,quote = F)
+```
+
+```{r}
+save(screp_lymphoid,file = paste0(outdir,"lymphoid_V2p1_merged_scRep.Robj"))
+```
+
+
+```{r}
+plotData <- read.table(file = paste0(outdir,"lymphoid_plotData.tsv"), sep = "\t",header = T)
+```
+
+
+```{r}
+ggplot(meta,aes(x = umap_1,y=umap_2,color = cloneType))+
+  geom_point()
+```
+
+```{r}
+NK <- subset(screp_lymphoid,subset = celltype == "NK")
+```
+
+```{r}
+table(NK$cloneType)
+```
+## conventional T
+
+```{r}
+load(paste0(outdir,"lymphoid_convT_V2p1_merged_scRep.Robj"))
+```
+
+```{r}
+meta <- screp@meta.data
+UMAP <- screp@reductions$umap@cell.embeddings
+TSNE <- screp@reductions$tsne@cell.embeddings
+meta = cbind(UMAP,TSNE,meta)
+```
+
+```{r}
+ggplot(meta,aes(x = umap_1,y=umap_2,color = cloneType))+
+  geom_point()
+```
+
+```{r}
+write.table(meta,file = paste0(outdir,"conventional_T_plotData.tsv"),sep = "\t",col.names = T,row.names = F,quote = F)
+```
+
+## CD4
+
+```{r}
+load(paste0(outdir,"lymphoid_conv_CD4_V2p1_merged_scRep.Robj"))
+```
+
+```{r}
+meta <- CD4@meta.data
+UMAP <- CD4@reductions$umap@cell.embeddings
+TSNE <- CD4@reductions$tsne@cell.embeddings
+meta = cbind(UMAP,TSNE,meta)
+```
+
+```{r}
+ggplot(meta,aes(x = umap_1,y=umap_2,color = cloneType))+
+  geom_point()
+```
+
+```{r}
+write.table(meta,file = paste0(outdir,"CD4_T_plotData.tsv"),sep = "\t",col.names = T,row.names = F,quote = F)
+```
+
+
+## CD8
+
+```{r}
+load(paste0(outdir,"lymphoid_conv_CD8_V2p1_merged_scRep.Robj"))
+```
+
+```{r}
+meta <- CD8@meta.data
+UMAP <- CD8@reductions$umap@cell.embeddings
+TSNE <- CD8@reductions$tsne@cell.embeddings
+meta = cbind(UMAP,TSNE,meta)
+```
+
+```{r}
+ggplot(meta,aes(x = umap_1,y=umap_2,color = cloneType))+
+  geom_point()
+```
+
+```{r}
+write.table(meta,file = paste0(outdir,"CD8_T_plotData.tsv"),sep = "\t",col.names = T,row.names = F,quote = F)
+```
+
+# check PC
+
+```{r}
+load(paste0(indir,"lymphoid_V2p1_merged_scRep.Robj"))
+```
+
+```{r}
+print(screp_lymphoid[["pca"]], dims = 1:5)
+```
+
+```{r}
+VizDimLoadings(screp_lymphoid, dims = 1:2, reduction = "pca",nfeatures = 40,balanced = T)
+```
+
+```{r}
+TopFeatures(object = screp_lymphoid[["pca"]], dim = 1, nfeatures = 80, balanced = TRUE)
+```
+
+
+```{r}
+g <- DotPlot(screp_lymphoid,features = TopFeatures(object = screp_lymphoid[["pca"]], dim = 1, nfeatures = 80, balanced = TRUE), group.by = "RNA_snn_res.0.6",cluster.idents = T) + RotatedAxis()
+ggsave("PC1_top80_balanced_lymphoid_res06_DotPlot.pdf",plot = g,width = 20,height = 10)
+```
+
+```{r}
+g <- DotPlot(screp_lymphoid,features = TopFeatures(object = screp_lymphoid[["pca"]], dim = 1, nfeatures = 80, balanced = TRUE), group.by = "RNA_snn_res.0.5",cluster.idents = T) + RotatedAxis()
+ggsave("PC1_top80_balanced_lymphoid_res05_DotPlot.pdf",plot = g,width = 20,height = 10)
+```
+
+## perform DE for 
+
+```{r}
+colnames(screp_lymphoid@meta.data)
+```
+
+```{r}
+DimPlot(screp_lymphoid,group.by = "celltype")
+DimPlot(screp_lymphoid,group.by = "annotation_prelim")
+DimPlot(screp_lymphoid,group.by = "RNA_snn_res.0.6",label = T)
+```
+```{r}
+# 10, 1 , 6
+# 16, 3, 0, 15, 2
+# Actually to make things simplier, just run DE and GSEA over res.0.6
+Idents(screp_lymphoid) <- "RNA_snn_res.0.6"
+DE_genes <- FindAllMarkers(screp_lymphoid)
+```
+
+
+```{r}
+library(msigdbr)
+library(fgsea)
+library(org.Mm.eg.db)
+library(Seurat) # youb know why
+library(tidyverse) # base package for data organization and plotting
+library(RColorBrewer) # for making palettes
+library(gridExtra) # for arranging multiple plots
+library(data.table) # well...
+```
+
+```{r prepare gene sets}
+H_df<- msigdbr(species = "Mus musculus", category = "H")
+Imm_df <- msigdbr(species = "Mus musculus", category = "C7",subcategory = "IMMUNESIGDB")
+Celltype_df <- msigdbr(species = "Mus musculus", category = "C8")
+C2_KEGG <- msigdbr(species = "Mus musculus", category = "C2",subcategory = "CP:KEGG")
+C2_React <- msigdbr(species = "Mus musculus", category = "C2",subcategory = "CP:REACTOME")
+
+
+fgsea_sets_Hallmark <- H_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_Imm <- Imm_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_KEGG <- C2_KEGG %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_REACT <- C2_React %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_Celltype <- Celltype_df %>% split(x = .$gene_symbol, f = .$gs_name)
+
+```
+
+```{r}
+fgsea_res <- function(cell_type_vector, DE_genes, choose_n = 100, choose_tops = F,gene_set = fgsea_sets_Hallmark,mode = "combined",outdir){
+  if(!dir.exists(outdir)) {dir.create(outdir)}
+  fgsea_res <- list()
+  #DE_selected <- DE_genes %>% group_by(cluster) %>% filter(p_val_adj < 0.05 & abs(avg_log2FC) > 1 & pct.1 > 0.1) %>% mutate(metric = sign(avg_log2FC)*(-log10(p_val_adj))) %>% filter(!is.infinite(metric))
+  DE_selected <- DE_genes %>% mutate(metric = sign(avg_log2FC)*(-log10(p_val_adj))) %>% filter(!is.infinite(metric))
+  if (mode == "simple"){
+    DE_selected <- DE_genes %>% mutate(metric = avg_log2FC) %>% filter(!is.infinite(metric))
+  }
+  for (i in cell_type_vector) {
+    DE <- DE_selected[DE_selected$cluster == i,] %>% arrange(desc(metric)) %>% dplyr::select(gene,metric)
+    if (choose_tops){
+      DE_top <- DE %>% group_by(cluster) %>% slice_max(order_by = metric, n = choose_n)
+      DE_tail <- DE %>% group_by(cluster) %>% slice_min(order_by = metric, n = choose_n)
+      DE <- rbind(DE_top,DE_tail)
+    }
+    DE <- DE %>% arrange(desc(metric)) %>% dplyr::select(gene,metric)
+    rankings <- DE$metric
+    names(rankings) <- DE$gene
+    #print(rankings)
+    plot(rankings)
+    title(main = i)
+    fgseaRes <- fgsea(gene_set, stats = rankings,nPermSimple = 10000)
+    fgseaResTidy <- fgseaRes %>%
+      as_tibble() %>% filter(padj < 0.05 ) %>%
+      arrange(desc(NES))
+  fgsea_res[[i]] <- fgseaResTidy
+  fwrite(fgseaResTidy, file=paste0(outdir,i,"_fgsea.tsv"), sep="\t", sep2=c("", " ", ""))
+  } # need to add name of gene sets to the file name
+   return(fgsea_res)
+}
+```
+
+```{r}
+outdir <- "functional_analysis/"
+if (!dir.exists(outdir)){
+  dir.create(outdir)
+}
+```
+
+```{r}
+fgsea_hallmark <- fgsea_res(as.character(unique(DE_genes$cluster)),DE_genes,gene_set = fgsea_sets_Hallmark,mode = "simple",outdir = paste0(outdir,"Hallmark/"))
+
+Hallmark_vector <- names(fgsea_sets_Hallmark)
+celltype_vector <- as.character(unique(DE_genes$cluster))
+table_res <- data.frame(pathway = Hallmark_vector)
+for (i in celltype_vector){
+  table_tmp <- fgsea_hallmark[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Hallmark_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res <- full_join(table_res,table_celltype,by = "pathway")
+}
+
+table_res[is.na(table_res)] = 0
+table_res <- table_res[apply(table_res[,2:(length(unique(DE_genes$cluster))+1)],1,var) != 0,]
+
+write.table(table_res,file = paste0(outdir,"Hallmark/","fgsea_res06_Hallmark_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+```{r}
+fgsea_REACT <- fgsea_res(as.character(unique(DE_genes$cluster)),DE_genes,gene_set = fgsea_sets_REACT,mode = "simple",outdir = paste0(outdir,"Reactome/"))
+
+REACT_vector <- names(fgsea_sets_REACT)
+celltype_vector <- as.character(unique(DE_genes$cluster))
+table_res <- data.frame(pathway = REACT_vector)
+for (i in celltype_vector){
+  table_tmp <- fgsea_REACT[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% REACT_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res <- full_join(table_res,table_celltype,by = "pathway")
+}
+
+table_res[is.na(table_res)] = 0
+table_res <- table_res[apply(table_res[,2:(length(unique(DE_genes$cluster))+1)],1,var) != 0,]
+
+write.table(table_res,file = paste0(outdir,"Reactome/","fgsea_res06_Reactome_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+```{r}
+fgsea_celltype <- fgsea_res(as.character(unique(DE_genes$cluster)),DE_genes,gene_set = fgsea_sets_Celltype,mode = "simple",outdir = paste0(outdir,"Celltype/"))
+
+CellType_vector <- names(fgsea_sets_Celltype)
+celltype_vector <- as.character(unique(DE_genes$cluster))
+table_res <- data.frame(pathway = CellType_vector)
+for (i in celltype_vector){
+  table_tmp <- fgsea_celltype[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% CellType_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res <- full_join(table_res,table_celltype,by = "pathway")
+}
+
+table_res[is.na(table_res)] = 0
+table_res <- table_res[apply(table_res[,2:(length(unique(DE_genes$cluster))+1)],1,var) != 0,]
+
+write.table(table_res,file = paste0(outdir,"Celltype/","fgsea_res06_Celltype_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+```{r}
+fgsea_imm <- fgsea_res(as.character(unique(DE_genes$cluster)),DE_genes,gene_set = fgsea_sets_Imm,mode = "simple",outdir = paste0(outdir,"Immunogenic/"))
+
+imm_vector <- names(fgsea_sets_Imm)
+celltype_vector <- as.character(unique(DE_genes$cluster))
+table_res <- data.frame(pathway = imm_vector)
+for (i in celltype_vector){
+  table_tmp <- fgsea_imm[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% imm_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res <- full_join(table_res,table_celltype,by = "pathway")
+}
+
+table_res[is.na(table_res)] = 0
+table_res <- table_res[apply(table_res[,2:(length(unique(DE_genes$cluster))+1)],1,var) != 0,]
+
+write.table(table_res,file = paste0(outdir,"Immunogenic/","fgsea_res06_Immunogenic_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+```{r}
+fgsea_KEGG <- fgsea_res(as.character(unique(DE_genes$cluster)),DE_genes,gene_set = fgsea_sets_KEGG,mode = "simple",outdir = paste0(outdir,"KEGG/"))
+
+KEGG_vector <- names(fgsea_sets_KEGG)
+celltype_vector <- as.character(unique(DE_genes$cluster))
+table_res <- data.frame(pathway = KEGG_vector)
+for (i in celltype_vector){
+  table_tmp <- fgsea_KEGG[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% KEGG_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res <- full_join(table_res,table_celltype,by = "pathway")
+}
+
+table_res[is.na(table_res)] = 0
+table_res <- table_res[apply(table_res[,2:(length(unique(DE_genes$cluster))+1)],1,var) != 0,]
+
+write.table(table_res,file = paste0(outdir,"KEGG/","fgsea_res06_KEGG_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+

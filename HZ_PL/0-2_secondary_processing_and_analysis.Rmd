@@ -1,0 +1,269 @@
+---
+title: "0-2_secondary_processing_and_analysis"
+output: html_document
+date: "2024-08-27"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(miQC)
+library(SeuratWrappers) # for miQC
+library(harmony) # for integration
+```
+
+```{r}
+# template palette for > 40 labels
+library(RColorBrewer)
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+```
+
+# load data and check markers
+
+```{r}
+indir <- "RDS/"
+outdir <- "R_outs/" # for storing plots if necessary
+if (!dir.exists(outdir)) dir.create(outdir)
+```
+
+```{r}
+load(paste0(indir,"whole_V1p2.Robj"))
+```
+
+
+```{r}
+DimPlot(whole,group.by = "RNA_snn_res.0.1",label = T)
+```
+
+Marker panel 1:
+Hbb-bs + Alas: rule out erythrocytes
+Pf4: rule out platelets
+
+The clusters aren't ideally clean yet, but we can start with lowest resolution.
+c11 (Mki67+ Cd3e+ Cd8a+ Cd4-low): proliferating T cells; mostly CD8 T cells
+c10: cDC1 (Flt3+ Xcr1+)
+c8: pDC (Flt3+ Siglech+ Cd4+ Cd8a+)
+
+c13 + c2: B cells (Cd19+ Cd79a+; Cd79a works better for brain B cells, but c13 is IgE receptor negative and weak in Ptprc along with weak expression in other markers, so c13 could be a multiplet cluster.)
+
+CD4 and CD8 T cells can't be perfectly separated at the preliminary stage, so they will be temporarily grouped until the T cell subset is isolated. Some people are fine with them mingled together and the annotation can be determined based which one of them is the dominent population within the cluster.
+
+
+c0,1,3,4,5,6,9: T cells (Cd3e+ Cd4+ Cd8a+);
+c0: CD8 T
+c1: CD4 T
+c3: NKT mixture (Klrb1c+)
+c4: exhausted or activated T (mainly CD8)
+c5: maybe gdT (Rorc+) or CD4 Th (Th17?)
+c6: Tcf7 high T cells (maybe naive CD4 and CD8)
+c9: NKT mixture (Klrb1c+)
+
+c7: ILC3 (Gata3+ Cd3e+)
+c12: Rorc+; maybe another ILC
+
+
+```{r}
+Idents(whole) <- "RNA_snn_res.0.1"
+DotPlot(whole,features = c("Mki67","Ptprc","Cd3e","Cd8a","Cd4","Foxp3","Gata3","Rorc","Klrb1c","Tcf7","Tox","Cd19","Cd79a","Flt3","Cd44","Ncam1","Xcr1","Ncr1","Siglech","S100a8","Mpo","Ccr2","Fcer1a","Fcer2a","Hbb-bs","Alas2","Pf4"),group.by = "RNA_snn_res.0.1",cluster.idents = T)+RotatedAxis()
+# some of the markers are cell-state markers because cells can cluster by cell-states.
+# This is important for ruling out doublet/multiplet clusters
+```
+
+Decision: create a T cell subset;
+
+```{r}
+Idents(whole) <- "RNA_snn_res.0.1"
+T_cells <- subset(whole, idents = c(0,1,3,4,5,6,9,7,12,11))
+```
+
+# process T cells
+
+I temporarily decided not be worry about ribosomal RNA. If later they are suggested to affect biologically meaningful clustering for the T cells, I'll regress them out.
+
+```{r}
+T_cells <- FindVariableFeatures(object = T_cells, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(T_cells) <-  VariableFeatures(T_cells) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(T_cells))]
+VariableFeaturePlot(T_cells)
+
+T_cells <- ScaleData(object = T_cells, features = VariableFeatures(object = T_cells), vars.to.regress = c("nCount_RNA", "percent.mt"))
+T_cells <- RunPCA(object = T_cells,
+                features =  VariableFeatures(object = T_cells),
+                dims = 1:50)
+gc()
+ElbowPlot(T_cells,ndims = 50)
+
+T_cells <- RunHarmony(object = T_cells, group.by.vars = c("orig.ident"), max.iter.harmony = 20) # use harmony to correct for batch effect
+T_cells <- RunUMAP(T_cells,dims = 1:30,reduction = "harmony") # use harmony embedding for downstream analysis
+T_cells <- RunTSNE(T_cells,dims = 1:30,reduction = "harmony")
+
+T_cells <- FindNeighbors(T_cells, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  T_cells <- FindClusters(object = T_cells, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+T_cells <- JoinLayers(T_cells)
+```
+
+```{r eval=FALSE}
+save(T_cells,file = paste0(indir,"T_cells_V1p2.Robj"))
+```
+
+```{r}
+DimPlot(T_cells,group.by = "RNA_snn_res.0.5",label = T)
+```
+
+```{r}
+Idents(T_cells) <- "RNA_snn_res.0.5"
+FeaturePlot(T_cells,features = c("Klrb1c"),label = T)
+FeaturePlot(T_cells,features = c("Cd3e"),label = T)
+FeaturePlot(T_cells,features = c("Cd8a"),label = T)
+FeaturePlot(T_cells,features = c("Cd4"),label = T)
+FeaturePlot(T_cells,features = c("Lef1","Tcf7"),label = T)
+FeaturePlot(T_cells,features = c("Tox","Pdcd1"),label = T)
+FeaturePlot(T_cells,features = c("Rorc"),label = T)
+FeaturePlot(T_cells,features = c("Gata3"),label = T)
+FeaturePlot(T_cells,features = c("Mki67"),label = T)
+```
+
+c15 is the new proliferating cluster; part of it is Cd3e-
+c9 is ILC3 (Cd3e- Gata3+)
+Klrb1c + (NK/NKT-like) clusters are 5,14,11
+
+panel 1: sanity check
+
+```{r}
+Idents(T_cells) <- "RNA_snn_res.0.5"
+DotPlot(T_cells,features = c("Mki67","Ptprc","Cd3e","Cd8a","Cd4","Foxp3","Gata3","Rorc","Klrb1c","Tcf7","Tox","Cd19","Cd79a","Flt3","Cd44","Ncam1","Xcr1","Ncr1","Siglech","S100a8","Mpo","Ccr2","Fcer1a","Fcer2a","Hbb-bs","Alas2","Pf4"),group.by = "RNA_snn_res.0.5",cluster.idents = T)+RotatedAxis()
+```
+
+c18 is a small B cell/multiplet cluster
+
+
+panel 2: more into subtypes
+
+```{r}
+Idents(T_cells) <- "RNA_snn_res.0.5"
+DotPlot(T_cells,features = c("Mki67","Ptprc","Cd3e","Cd8a","Cd4","Foxp3","Icos","Gata3","Rorc","Klrb1c","Lef1","Tcf7","Il2ra","Tigit","Pdcd1","Tox","Cd19","Cd79a","Cd44","Ncr1","Ccr2"),group.by = "RNA_snn_res.0.5",cluster.idents = T)+RotatedAxis()
+```
+c6,11,5,14 are Klrb1c+; but need to remove multiplets first.
+
+```{r}
+Idents(T_cells) <- "RNA_snn_res.0.5"
+T_cells <- subset(T_cells, idents = c(0:17)) # version V1p3
+```
+
+## process V1p3
+
+
+```{r}
+T_cells <- FindVariableFeatures(object = T_cells, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(T_cells) <-  VariableFeatures(T_cells) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(T_cells))]
+VariableFeaturePlot(T_cells)
+
+T_cells <- ScaleData(object = T_cells, features = VariableFeatures(object = T_cells), vars.to.regress = c("nCount_RNA", "percent.mt"))
+T_cells <- RunPCA(object = T_cells,
+                features =  VariableFeatures(object = T_cells),
+                dims = 1:50)
+gc()
+ElbowPlot(T_cells,ndims = 50)
+
+T_cells <- RunHarmony(object = T_cells, group.by.vars = c("orig.ident"), max.iter.harmony = 20) # use harmony to correct for batch effect
+T_cells <- RunUMAP(T_cells,dims = 1:30,reduction = "harmony") # use harmony embedding for downstream analysis
+T_cells <- RunTSNE(T_cells,dims = 1:30,reduction = "harmony")
+
+T_cells <- FindNeighbors(T_cells, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  T_cells <- FindClusters(object = T_cells, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+T_cells <- JoinLayers(T_cells)
+```
+
+```{r eval=FALSE}
+save(T_cells,file = paste0(indir,"T_cells_V1p3.Robj"))
+```
+
+```{r}
+DimPlot(T_cells,group.by = "RNA_snn_res.0.1",label = T)
+```
+
+```{r}
+Idents(T_cells) <- "RNA_snn_res.0.5"
+DotPlot(T_cells,features = c("Mki67","Ptprc","Cd3e","Cd8a","Cd4","Foxp3","Icos","Gata3","Rorc","Klrb1c","Ncr1","Tyrobp","Lef1","Tcf7","Il2ra","Ifitm3","Tigit","Pdcd1","Tox","Cd19","Cd79a","Cd44","Ccr2"),group.by = "RNA_snn_res.0.5",cluster.idents = T)+RotatedAxis()
+```
+
+```{r}
+DefaultAssay(T_cells) <- "ADT"
+FeaturePlot(T_cells, "NK1.1", cols = c("lightgrey", "red2"),order = T) + ggtitle("NK1.1 protein")
+```
+
+```{r}
+FeaturePlot(T_cells,features = c("percent.mt"))
+FeaturePlot(T_cells,features = c("log10_nCount_RNA"))
+FeaturePlot(T_cells,features = c("log10_nFeature_RNA"))
+```
+
+```{r}
+prop_table <- T_cells@meta.data %>% group_by(orig.ident,RNA_snn_res.0.5) %>% summarise(cluster_size= n()) %>% ungroup() %>% group_by(orig.ident) %>% mutate(proportion = 100*cluster_size/sum(cluster_size))
+```
+
+```{r}
+g <- ggplot(prop_table)+
+  geom_bar(aes(x = orig.ident, y = proportion, fill = RNA_snn_res.0.5), stat = "identity",position = "stack")+scale_fill_manual(values = pal)+theme_classic()
+g
+ggsave(paste0(outdir,"T_cells_V1p3_res05_proportion_stack.pdf"),width = 10, height = 6)
+```
+
+```{r}
+g <- ggplot(prop_table)+
+  geom_bar(aes(x = orig.ident, y = proportion, fill = RNA_snn_res.0.5), stat = "identity",position = "dodge")+scale_fill_manual(values = pal)+facet_wrap(~RNA_snn_res.0.5,scales = "free")+theme_classic()+theme(axis.text.x = element_text(angle = 90))
+g
+ggsave(paste0(outdir,"T_cells_V1p3_res05_proportion_dodge.pdf"),width = 15,height = 10)
+```
+```{r}
+Idents(T_cells) <- "RNA_snn_res.0.1"
+DefaultAssay(T_cells) <- "RNA"
+DotPlot(T_cells,features = c("Mki67","Ptprc","Cd3e","Cd8a","Cd4","Foxp3","Icos","Gata3","Rorc","Klrb1c","Ncr1","Tyrobp","Lef1","Tcf7","Il2ra","Ifitm3","Tigit","Pdcd1","Tox","Cd19","Cd79a","Cd44","Ccr2"),group.by = "RNA_snn_res.0.1",cluster.idents = T)+RotatedAxis()
+```
+
+```{r}
+Idents(T_cells) <- "RNA_snn_res.0.1"
+p1 <- DotPlot(T_cells,features = c("Mki67","Ptprc","Cd3e","Cd8a","Cd4","Foxp3","Icos","Gata3","Rorc","Klrb1c","Ncr1","Tyrobp","Lef1","Tcf7","Il2ra","Ifitm3","Tigit","Pdcd1","Tox","Cd19","Cd79a","Cd44","Ccr2"),group.by = "RNA_snn_res.0.1",cluster.idents = T)+RotatedAxis()
+p2 <- FeaturePlot(T_cells,features = c("Klrb1c"),label = T)
+p3 <- FeaturePlot(T_cells,features = c("Cd3e"),label = T)
+p4 <- FeaturePlot(T_cells,features = c("Cd8a"),label = T)
+g <- gridExtra::grid.arrange(grobs = list(p1,p2,p3,p4),layout_matrix = rbind(c(1,1,1),c(2,3,4)))
+ggsave(paste0(outdir,"T_cells_V1p3_NKT_markers.pdf"),plot = g, width = 15, height = 8)
+
+```
+
+
+```{r}
+prop_table <- T_cells@meta.data %>% group_by(orig.ident,RNA_snn_res.0.1) %>% summarise(cluster_size= n()) %>% ungroup() %>% group_by(orig.ident) %>% mutate(proportion = 100*cluster_size/sum(cluster_size))
+
+g <- ggplot(prop_table)+
+  geom_bar(aes(x = orig.ident, y = proportion, fill = RNA_snn_res.0.1), stat = "identity",position = "stack")+scale_fill_manual(values = pal)+theme_classic()
+g
+ggsave(paste0(outdir,"T_cells_V1p3_res01_proportion_stack.pdf"),width = 10, height = 6)
+
+
+
+g <- ggplot(prop_table)+
+  geom_bar(aes(x = orig.ident, y = proportion, fill = RNA_snn_res.0.1), stat = "identity",position = "dodge")+scale_fill_manual(values = pal)+facet_wrap(~RNA_snn_res.0.1,scales = "free")+theme_classic()+theme(axis.text.x = element_text(angle = 90))
+g
+ggsave(paste0(outdir,"T_cells_V1p3_res01_proportion_dodge.pdf"),width = 15,height = 10)
+```
+```{r}
+write.table(prop_table,paste0(outdir,"T_cells_V1p3_res01_proportion_table.tsv"),sep = "\t",col.names = T,row.names = F)
+```
+
+
+

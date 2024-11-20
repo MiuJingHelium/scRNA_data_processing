@@ -1,0 +1,117 @@
+---
+title: "post-correlation functional analysis"
+output: html_document
+date: "2024-08-08"
+---
+
+The goal is to group functional analysis results of cells from the same community. Note that the DE genes and GSEA results are still generated from their counterparts within the same type of cells.
+
+# GSEA results
+
+Note that not all cell types have GSEA results
+
+## Hallmark
+
+```{r}
+GS <- "Hallmark/"
+```
+
+
+```{r}
+B_hallmark <- read.table(paste0("functional_analysis_V3_alt/","B_cells/",GS,"fgsea_lymphoid_Hallmark_consolidated_filtered.tsv"),sep = "\t",header = T)
+glioma_hallmark <- read.table(paste0("functional_analysis_V3_alt/","glioma/",GS,"fgsea_glioma_Hallmark_consolidated_filtered.tsv"),sep = "\t",header = T)
+```
+
+```{r}
+T_hallmark <- read.table(paste0("functional_analysis_V3_alt/","T_cells/",GS,"fgsea_lymphoid_Hallmark_consolidated_filtered.tsv"),sep = "\t",header = T)
+MG_hallmark <- read.table(paste0("functional_analysis_V3_alt/","microglia/",GS,"fgsea_microglia_Hallmark_consolidated_filtered.tsv"),sep = "\t",header = T)
+MoMac_hallmark <- read.table(paste0("functional_analysis_V3_alt/","Mo-Mac/",GS,"fgsea_myeloid_Hallmark_consolidated_filtered.tsv"),sep = "\t",header = T)
+```
+
+```{r}
+colnames(B_hallmark)
+colnames(glioma_hallmark)
+colnames(T_hallmark)
+colnames(MG_hallmark)
+colnames(MoMac_hallmark)
+```
+
+```{r}
+full_hallmark_row <- unique(c(B_hallmark$pathway,glioma_hallmark$pathway,T_hallmark$pathway,MG_hallmark$pathway,MoMac_hallmark$pathway))
+full_hallmark <- data.frame(pathway = HGG_hallmark_row,row.names = HGG_hallmark_row)
+full_hallmark <- full_join(full_hallmark,B_hallmark,by = "pathway")
+full_hallmark <- full_join(full_hallmark,glioma_hallmark,by = "pathway")
+full_hallmark <- full_join(full_hallmark,T_hallmark,by = "pathway")
+full_hallmark <- full_join(full_hallmark,MG_hallmark,by = "pathway")
+full_hallmark <- full_join(full_hallmark,MoMac_hallmark,by = "pathway")
+full_hallmark[is.na(full_hallmark)] <- 0
+```
+
+### HGG community
+
+```{r}
+HGG_cells <- c("tumor_3","tumor_10","Treg","Proliferating_T_cells","Naive_T_cells","Pdcd1_Cd44_high_activated_T","HGG.HIGH_PAM","HGG.HIGH_proliferating.microglia","GAM","intM","Memory_B_2")
+```
+
+```{r}
+HGG_hallmark <- full_hallmark[,c("pathway",HGG_cells)]
+HGG_hallmark <- HGG_hallmark[apply(HGG_hallmark[,2:(length(HGG_cells)+1)],1,var) != 0,]
+
+write.table(HGG_hallmark,file = "consolidated_HGG_correlated_pop_hallmark.tsv",sep = "\t",row.names = F, col.names = T,quote = F)
+```
+
+
+### LGG1
+
+```{r}
+LGG1 <- c("MHC2_high_BAM","Complement_GBP_BAM","Slamf9_macrophage","LGG.HIGH_Nr4a1_Fos_high_MG","HET_unknown_MG","HGG.HIGH_Chst2_high_MG","X1_activated_CD4","tumor_12","tumor_5","Ifn.responsive_T_cells","LGG.HIGH_Ifn.responsive_MG","tumor_1","LGG.HIGH_Il7r_Hspa1a_high_MG","tumor_7","tumor_11","tumor_2")
+```
+
+
+```{r}
+LGG1_hallmark <- full_hallmark[,c("pathway",LGG1)]
+LGG1_hallmark <- LGG1_hallmark[apply(LGG1_hallmark[,2:(length(LGG1)+1)],1,var) != 0,]
+
+write.table(LGG1_hallmark,file = "consolidated_LGG1_correlated_pop_hallmark.tsv",sep = "\t",row.names = F, col.names = T,quote = F)
+```
+
+### NT
+
+```{r}
+NT_cells <- c("tumor_4","NT.HIGH_Trem2_Ccr6_high_MG","NT.HIGH_Fosb_Dusp1_high_MG","NT.HIGH_BAM.like_Sparc.","MHC2_low_BAM")
+```
+
+```{r}
+NT_hallmark <- full_hallmark[,c("pathway",NT_cells)]
+NT_hallmark <- NT_hallmark[apply(NT_hallmark[,2:(length(NT_cells)+1)],1,var) != 0,]
+
+write.table(NT_hallmark,file = "consolidated_NT_correlated_pop_hallmark.tsv",sep = "\t",row.names = F, col.names = T,quote = F)
+```
+
+
+### LGG2
+
+```{r}
+LGG2 <- c(colnames(B_hallmark),
+colnames(glioma_hallmark),
+colnames(T_hallmark),
+colnames(MG_hallmark),
+colnames(MoMac_hallmark))[!(c(colnames(B_hallmark),
+colnames(glioma_hallmark),
+colnames(T_hallmark),
+colnames(MG_hallmark),
+colnames(MoMac_hallmark)) %in% c(LGG1, NT_cells, HGG_cells)) & (c(colnames(B_hallmark),
+colnames(glioma_hallmark),
+colnames(T_hallmark),
+colnames(MG_hallmark),
+colnames(MoMac_hallmark)) != "pathway")]
+```
+
+
+```{r}
+LGG2_hallmark <- full_hallmark[,c("pathway",LGG2)]
+LGG2_hallmark <- LGG2_hallmark[apply(LGG2_hallmark[,2:(length(LGG2)+1)],1,var) != 0,]
+
+write.table(LGG2_hallmark,file = "consolidated_LGG2_correlated_pop_hallmark.tsv",sep = "\t",row.names = F, col.names = T,quote = F)
+```
+

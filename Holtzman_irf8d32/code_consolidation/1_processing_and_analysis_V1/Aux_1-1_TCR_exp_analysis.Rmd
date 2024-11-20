@@ -1,0 +1,61 @@
+---
+title: "TCR Exploratory Analysis"
+output: html_document
+date: "2024-02-08"
+---
+
+```{r}
+library(dplyr)
+library(data.table)
+library(tidyr)
+library(ggplot2)
+library(igraph)
+library(RColorBrewer)
+library(ggrepel)
+library(kableExtra)
+library(ggseqlogo)
+library(stringr)
+library(gridExtra)
+library(ggpubr)
+library(grid)
+library(DescTools)
+```
+I have version 1 output from RIS, so I'll be using those for finishing the codes.
+
+```{r}
+outdir <- "./TCR_processed_dataset/TCR/"
+```
+
+```{r}
+clons.cd8.filtered <- read.table(paste0(outdir,"clones_cd8_filtered.txt"),sep = "\t",header = T)
+```
+
+```{r}
+clons.cd8.filtered <- clons.cd8.filtered[order(clons.cd8.filtered$frequency,decreasing = T),]
+```
+
+```{r}
+clons.cd8.top.by.sample <- clons.cd8.filtered %>% group_by(Sample) %>% slice_max(order_by = frequency,n = 20)
+```
+
+```{r}
+ggplot(clons.cd8.top.by.sample, aes(x = reorder(id,-frequency), y= frequency))+
+  geom_bar(stat = "identity", position = "dodge")+
+  facet_wrap(~Sample,scales = "free")+RotatedAxis()+xlab("clonotype id ordered by frequency")
+```
+
+```{r}
+Gini_index_TC <- Gini(clons.cd8.filtered$frequency[clons.cd8.filtered$Sample=="T_C"])
+```
+
+```{r}
+clons.cd8.filtered.withGini <- clons.cd8.filtered %>% select(Sample,frequency) %>% group_by(Sample) %>% mutate(Gini_index = Gini(frequency))
+```
+
+
+```{r}
+ggplot(clons.cd8.filtered.withGini, aes(x = Sample, y= Gini_index))+
+  geom_bar(stat = "identity", position = "dodge")+RotatedAxis()+xlab("Sample")
+```
+
+

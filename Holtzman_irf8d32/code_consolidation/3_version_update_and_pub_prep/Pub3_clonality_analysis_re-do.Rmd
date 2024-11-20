@@ -1,0 +1,313 @@
+---
+title: "Pub3_clonality_analysis_re-do"
+output: html_document
+date: "2024-08-15"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(scater)
+library(data.table)
+library(RColorBrewer)
+library(gridExtra)
+library(ggrepel)
+library(kableExtra)
+library(scRepertoire)
+library(ggraph)
+library(circlize)
+library(scales)
+```
+
+```{r}
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+```
+
+
+```{r}
+indir <- "../V2_TCR_analysis_and_V3_Update/VDJ/"
+outdir <- "TCR_outs/"
+if (!dir.exists(outdir)) dir.create(outdir)
+```
+
+```{r}
+samples <- list.files(path = indir)
+```
+
+```{r}
+contig_files <- paste(indir,samples,"filtered_contig_annotations.csv",sep = "/")
+```
+
+```{r}
+contig_list <- lapply(as.list(contig_files), read.csv)
+names(contig_list) <- samples
+```
+
+
+
+```{r}
+combined <- combineTCR(contig_list,
+                       removeNA = T,
+                       removeMulti = T,
+                        samples = samples)
+```
+
+
+```{r}
+clonalQuant(combined, 
+            cloneCall="nt", 
+            chain = "both", 
+            scale = TRUE)
+```
+
+```{r}
+clonalAbundance(combined, cloneCall = "nt", scale = TRUE)
+```
+
+```{r}
+clonalLength(combined, 
+             cloneCall="nt", 
+             chain = "both") 
+```
+
+```{r}
+g <- clonalCompare(combined, 
+                  top.clones = 10, 
+                  cloneCall="nt", 
+                  graph = "alluvial")+scale_fill_manual(values = pal)
+g
+ggsave(paste0(outdir,"top10_AA_clone_nt.pdf"),plot = g, width = 30,height = 8)
+```
+```{r}
+clonalScatter(combined, 
+              cloneCall ="nt", 
+              x.axis = "T-C", 
+              y.axis = "T-KO",
+              dot.size = "total",
+              graph = "proportion")
+```
+
+```{r}
+relative_abundance <- as.data.frame(clonalHomeostasis(combined, 
+                  cloneCall = "nt",exportTable = T))
+relative_abundance = relative_abundance[,colSums(relative_abundance) > 0]
+relative_abundance$condition = rownames(relative_abundance)
+
+relative_abundance = reshape2::melt(relative_abundance, id = "condition",variable.name = "ClonalType", value.name = "Proportion")
+
+# ggsave(filename = paste0(outdir,"relative_clone_abundance.pdf"),plot = g, width = 10,height = 8)
+```
+
+```{r}
+table(relative_abundance$ClonalType)
+```
+
+
+```{r}
+g <- ggplot(relative_abundance)+
+  geom_bar(aes(x = condition, y = Proportion, fill = ClonalType ),stat = "identity",position = "stack")+scale_fill_manual(values = c("Small (1e-04 < X <= 0.001)" = "#56106EFF", "Medium (0.001 < X <= 0.01)" = "#BB3754FF", "Large (0.01 < X <= 0.1)" = "#F98C0AFF"))+theme_classic()
+g
+ggsave(filename = paste0(outdir,"relative_clone_abundance_nt.pdf"),plot = g, width = 10,height = 8)
+```
+
+```{r}
+relative_abundance <- as.data.frame(clonalHomeostasis(combined, 
+                  cloneCall = "aa",exportTable = T))
+relative_abundance = relative_abundance[,colSums(relative_abundance) > 0] 
+relative_abundance$condition = rownames(relative_abundance)
+
+relative_abundance = reshape2::melt(relative_abundance, id = "condition",variable.name = "ClonalType", value.name = "Proportion")
+g <- ggplot(relative_abundance)+
+  geom_bar(aes(x = condition, y = Proportion, fill = ClonalType ),stat = "identity",position = "stack")+scale_fill_manual(values = c("Small (1e-04 < X <= 0.001)" = "#56106EFF", "Medium (0.001 < X <= 0.01)" = "#BB3754FF", "Large (0.01 < X <= 0.1)" = "#F98C0AFF"))+theme_classic()
+g
+ggsave(filename = paste0(outdir,"relative_clone_abundance_aa.pdf"),plot = g, width = 10,height = 8)
+```
+
+
+
+
+```{r}
+clonalProportion(combined, 
+                 cloneCall = "aa") # proportion of top clones
+```
+
+
+```{r}
+clonalOverlap(combined, 
+              cloneCall = "aa", 
+              method = "morisita")
+```
+
+```{r}
+RDSdir <- "../V2_processing_analysis/R_outs/"
+load(paste0(RDSdir,"lymphoid_convT_V3p2_merged_scRep.Robj"))
+```
+
+
+```{r}
+colnames(screp.aa@meta.data)
+```
+
+```{r}
+screp.aa$CTaa <- NULL
+screp.aa$CTgene <- NULL
+screp.aa$CTnt <- NULL
+screp.aa$CTstrict <- NULL
+screp.aa$Frequency <- NULL
+screp.aa$cloneType <- NULL
+screp.aa$clonalProportion <- NULL
+screp.aa$clonalFrequency <- NULL
+screp.aa$cloneSize <- NULL
+```
+
+
+
+
+```{r}
+screp.aa <- combineExpression(combined, 
+                         screp.aa, 
+                         cloneCall="aa", 
+                         group.by = "sample", 
+                         proportion = TRUE)
+```
+
+
+```{r}
+colnames(screp.aa@meta.data)
+```
+```{r}
+freq_meta <- screp.aa@meta.data %>% filter(!is.na(cloneSize)) %>% group_by(orig.ident,cloneSize) %>% mutate(type_counts = n()) %>% ungroup() %>% group_by(orig.ident) %>% mutate(sample_size = n()) %>% ungroup() %>% mutate(proportion = type_counts/sample_size)
+```
+
+```{r}
+freq_meta %>% group_by(orig.ident, CTaa) %>% summarise(cloneFreq = n()) %>% slice_max(order_by = cloneFreq, n = 20) %>% ungroup()
+```
+
+```{r}
+save(screp.aa,file = paste0(RDSdir,"lymphoid_convT_V3p2_merged_scRep_aa.Robj"))
+```
+
+
+
+```{r}
+screp.nt <- combineExpression(combined, 
+                         screp.aa, 
+                         cloneCall="nt", 
+                         group.by = "sample", 
+                         proportion = TRUE)
+```
+
+```{r}
+save(screp.nt,file = paste0(RDSdir,"lymphoid_convT_V3p2_merged_scRep_nt.Robj"))
+```
+
+
+```{r}
+g <- ggplot(screp.nt@meta.data %>% group_by(orig.ident,celltype,CTaa,clonalProportion) %>% summarise() %>% ungroup() %>% group_by(orig.ident) %>% slice_max(order_by = clonalProportion, n = 20) %>% ungroup()) + 
+  geom_bar(aes(x = reorder(CTaa, -clonalProportion), y = clonalProportion, fill = orig.ident),stat = "identity",position = "dodge")+
+  facet_grid(~celltype, scale = "free")+theme_classic()+
+  xlab("Clonotype by amino acid")+
+  theme(axis.text.x = element_text(angle = 90,size = 5))
+g
+ggsave(paste0(outdir,"SAMPLE_Fig4_CD3r_chain_aa_top20.pdf"),plot = g, width = 20, height = 20)
+```
+
+```{r}
+g <- ggplot(screp.nt@meta.data %>% group_by(orig.ident,celltype,CTnt,clonalProportion) %>% summarise() %>% ungroup() %>% group_by(orig.ident) %>% slice_max(order_by = clonalProportion, n = 20) %>% ungroup()) + 
+  geom_bar(aes(x = reorder(CTnt, -clonalProportion), y = clonalProportion, fill = orig.ident),stat = "identity",position = "dodge")+
+  facet_grid(~celltype, scale = "free")+theme_classic()+
+  xlab("Clonotype by amino acid")+
+  theme(axis.text.x = element_text(angle = 90,size = 5))
+g
+ggsave(paste0(outdir,"SAMPLE_Fig4_CD3r_chain_nt_top20.pdf"),plot = g, width = 20, height = 20)
+```
+
+
+```{r}
+colnames(screp.aa@meta.data)
+```
+
+```{r}
+DimPlot(screp.aa,group.by = "cloneSize")+
+    scale_color_manual(values = c('#e31a1c','#fc4e2a','#fed976'))
+```
+```{r}
+screp.aa$group <- paste0(screp.aa$orig.ident,"_",screp.aa$cloneSize)
+```
+
+```{r}
+table(screp.aa$group)
+```
+
+```{r}
+g <- VlnPlot(screp.aa,features = c("Klrb1c"),group.by = "group")+scale_fill_manual(values = pal)
+g
+ggsave(filename = paste0(outdir,"troubleshoot_TKO_top_clone.pdf"),plot = g, width = 10,height = 8)
+```
+
+```{r}
+colnames(screp.aa@meta.data)
+```
+
+
+
+```{r}
+meta <- screp.aa@meta.data %>% group_by(orig.ident)  %>% arrange(cloneSize,clonalFrequency)
+top_AA <- meta %>% filter(orig.ident == "T_KO" | orig.ident == "T_C") %>% group_by(orig.ident,CTaa,clonalFrequency,cloneSize) %>% summarise() %>% slice_max(order_by = clonalFrequency,n = 5) %>% arrange(cloneSize,clonalFrequency)
+```
+
+```{r}
+head(top_AA)
+```
+
+The top clones in T are CAMREGYGSSGNKLIF_CASSWDWGGLSAETLYF in T-C and CAVMSNYNVLYF_CALGNTEVFF in T-KO. Put these two into highlights:
+
+
+```{r}
+screp.aa <- highlightClones(screp.aa, 
+                    cloneCall= "aa", 
+                    sequence = c("CAMREGYGSSGNKLIF_CASSWDWGGLSAETLYF", 
+                                 "CAVMSNYNVLYF_CALGNTEVFF"))
+
+```
+
+
+```{r}
+g <- DimPlot(screp.aa,group.by = "highlight",order = T)
+g
+ggsave(filename = paste0(outdir,"TKO-TC_top_1_clone.pdf"),plot = g, width = 8,height = 4)
+```
+
+```{r}
+g <- VlnPlot(screp.aa,features = c("Klrb1c"),group.by = "highlight")+scale_fill_manual(values = pal)
+g
+ggsave(filename = paste0(outdir,"troubleshoot_TKO_top_clone_exact.pdf"),plot = g, width = 10,height = 8)
+```
+
+```{r}
+screp.aa@meta.data <- screp.aa@meta.data %>% mutate(
+  annotation_final = case_match(
+    highlight,
+    "CAVMSNYNVLYF_CALGNTEVFF" ~ "NKT",
+    .default = annotation_final
+  )
+)
+```
+
+```{r}
+save(screp.aa,file = paste0(RDSdir,"lymphoid_convT_V3p2_merged_scRep.Robj"))
+```
+
+```{r}
+DimPlot(screp.aa,group.by = "annotation_final")+scale_color_manual(values = pal)
+```
+
+

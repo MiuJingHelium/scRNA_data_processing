@@ -1,0 +1,1128 @@
+---
+title: "post-prelim analysis DE and fgsea"
+output: html_document
+date: "2024-05-31"
+---
+
+```{r}
+# For DE
+library(tidyverse)
+library(Seurat)
+library(harmony)
+library(MAST)
+
+# for fgsea
+library(msigdbr)
+library(fgsea)
+library(org.Mm.eg.db)
+library(Seurat) # youb know why
+library(tidyverse) # base package for data organization and plotting
+library(RColorBrewer) # for making palettes
+library(gridExtra) # for arranging multiple plots
+library(data.table) # well...
+library(dslice) # for loading gmt files
+```
+
+```{r}
+indir <- "data/"
+outdir <- "functional_analysis_alt/"
+dir.create(outdir)
+```
+
+# DE
+## #neoplastic
+
+original codes contain some sanity check (`FeaturePlot`,`DimPlot`,`colnames()`,`table()`). They are kept in the archived version but removed in this version.
+
+```{r}
+load(paste0(indir,"GBM_RNA_10_glioma_V2_alt.Robj"))
+```
+
+```{r}
+Idents(Glioma) <- "annotation_V1"
+glioma_DE <- FindAllMarkers(Glioma,test.use = "MAST")
+```
+
+```{r}
+DimPlot(Glioma,group.by = "annotation_V1")
+```
+
+Note that tumor_7 from annotaion_V1 of glioma_V2 is positively enriched in heme metabolism, so it was suspected that tumor_7 is not an actual tumor cluster.
+
+```{r}
+VariableFeatures(Glioma)[51:80]
+```
+
+
+```{r}
+FeaturePlot(Glioma,features = "Hbb-bs")
+FeaturePlot(Glioma,features = "Mki67")
+FeaturePlot(Glioma,features = "Top2a")
+FeaturePlot(Glioma,features = "Mbp")
+FeaturePlot(Glioma,features = "Ptprc")
+FeaturePlot(Glioma,features = "Ttr")
+FeaturePlot(Glioma,features = "Mbp")
+FeaturePlot(Glioma,features = "Vim",split.by = "progress")
+FeaturePlot(Glioma,features = "Pdgfra")
+FeaturePlot(Glioma,features = "Olig2")
+```
+
+```{r}
+VlnPlot(Glioma,features = c("Vim"),group.by = "RNA_snn_res.0.7",split.by = "progress")
+VlnPlot(Glioma,features = c("Vim"),group.by = "progress",split.by = "batch_ID")
+VlnPlot(Glioma,features = c("Vim"),group.by = "progress")
+DimPlot(Glioma,group.by = "annotation_V1",split.by = "progress")
+```
+```{r}
+DimPlot(Glioma,split.by = "orig.ident")
+```
+```{r}
+meta <- cbind(Glioma@reductions$umap@cell.embeddings,Glioma@meta.data)
+```
+
+```{r}
+ggplot(meta,aes(x = umap_1, y = umap_2,color = monocle3_trajectory,label = annotation_V1))+
+  geom_point(size = 1)+
+  scale_color_viridis_c()+
+  theme_classic()
+
+```
+```{r}
+DimPlot(Glioma,group.by = "annotation_V1",label = T, label.size = 4)
+```
+
+
+```{r}
+write.table(glioma_DE,file = paste0(outdir,"glioma_res07_DE.tsv"),sep = "\t",col.names = T,row.names = F,quote = F)
+```
+
+### check DE profile
+
+```{r load DE genes}
+glioma_markers <- read.table(file = "functional_analysis_alt/glioma_res07_DE.tsv",header = T,sep = "\t")
+```
+
+```{r}
+ggplot(glioma_markers, aes(x = cluster, y = avg_log2FC)) +
+  geom_point(aes(colour = cut(p_val_adj, c(0, 0.01,1))),
+             size = 1)+
+  scale_color_manual(name = "p_val_adj",
+                    values = c("(0,0.01]" = "red",
+                                  "(0.01, 1]" = "black"),
+                     labels = c("<= 0.01", "> 0.01"))+
+  theme_classic()+RotatedAxis()
+ggplot(glioma_markers, aes(x = cluster, y = avg_log2FC * -log10(p_val_adj))) +
+  geom_point(aes(colour = cut(p_val_adj, c(0, 0.01,1))),
+             size = 1)+
+  scale_color_manual(name = "p_val_adj",
+                    values = c("(0,0.01]" = "red",
+                                  "(0.01, 1]" = "black"),
+                     labels = c("<= 0.01", "> 0.01"))+
+  theme_classic()+RotatedAxis()
+```
+
+```{r}
+# use V2 glioma
+n_cells <- Glioma@meta.data %>% group_by(annotation_V1) %>% summarise(n=n())
+n_DE <- glioma_markers %>% group_by(cluster) %>% filter(p_val_adj <= 0.01) %>% summarise(n_DE = n())
+n_DE_cells <- cbind(n_cells,n_DE)
+n_DE_cells <- n_DE_cells[,c("annotation_V1","n","n_DE")]
+```
+
+
+```{r}
+ggplot(n_DE_cells,aes(x = annotation_V1, y = n_DE/n))+
+  geom_bar(stat = "identity")+RotatedAxis()
+```
+
+
+## immune cells
+
+Originally, the processing of V3 immune cell subsets was performed inside the prelim_functional_analysis.Rmd (now archived). The following codes are consolidated and re-organized to make the workflow more readable.
+
+### microglia
+
+```{r}
+load((paste0(indir,"GBM_RNA_10_microglia_V3_alt.Robj")))
+```
+
+```{r}
+Idents(microglia) <- "annotation_V1"
+microglia_DE <- FindAllMarkers(microglia,test.use = "MAST")
+write.table(microglia_DE,file = paste0(outdir,"microglia_V3_res04_DE.tsv"),sep = "\t",col.names = T,row.names = F,quote = F)
+```
+
+```{r}
+DimPlot(microglia,group.by = "annotation_V1",split.by = "progress")
+DimPlot(microglia,group.by = "annotation_V1",label = T,label.size = 3)
+```
+
+```{r}
+# use V2 glioma
+n_cells <- microglia@meta.data %>% group_by(annotation_V1) %>% summarise(n=n())
+n_DE <- microglia_markers %>% group_by(cluster) %>% filter(p_val_adj <= 0.01) %>% summarise(n_DE = n())
+n_DE_cells <- cbind(n_cells,n_DE)
+n_DE_cells <- n_DE_cells[,c("annotation_V1","n","n_DE")]
+```
+
+
+```{r}
+ggplot(n_DE_cells,aes(x = annotation_V1, y = n_DE/n))+
+  geom_bar(stat = "identity")+RotatedAxis()
+```
+
+
+### myeloid
+
+```{r}
+load(paste0(indir,"GBM_RNA_10_myeloid_V3p2_alt.Robj"))
+```
+
+
+```{r}
+Idents(myeloid) <- "annotation_V1"
+myeloid_DE <- FindAllMarkers(myeloid,test.use = "MAST")
+write.table(myeloid_DE,file = paste0(outdir,"myeloid_V3_res08_DE.tsv"),sep = "\t",col.names = T,row.names = F,quote = F)
+```
+
+
+```{r}
+# use V2 glioma
+n_cells <- myeloid@meta.data %>% group_by(annotation_V1) %>% summarise(n=n())
+n_DE <- myeloid_markers %>% group_by(cluster) %>% filter(p_val_adj <= 0.01) %>% summarise(n_DE = n())
+n_DE_cells <- cbind(n_cells,n_DE)
+n_DE_cells <- n_DE_cells[,c("annotation_V1","n","n_DE")]
+```
+
+```{r}
+ggplot(n_DE_cells,aes(x = annotation_V1, y = n_DE/n))+
+  geom_bar(stat = "identity")+RotatedAxis()
+```
+
+### lymphoid
+
+```{r}
+load(paste0(indir,"GBM_RNA_10_lymphoid_V3p1_alt.Robj"))
+```
+
+```{r}
+Idents(lymphoid) <- "annotation_V1"
+lymphoid_DE <- FindAllMarkers(lymphoid,test.use = "MAST")
+write.table(lymphoid_DE,file = paste0(outdir,"lymphoid_V3_res07_DE.tsv"),sep = "\t",col.names = T,row.names = F,quote = F)
+```
+
+```{r}
+# use V2 glioma
+n_cells <- lymphoid@meta.data %>% group_by(annotation_V1) %>% summarise(n=n())
+n_DE <- lymphoid_markers %>% group_by(cluster) %>% filter(p_val_adj <= 0.01) %>% summarise(n_DE = n())
+n_DE_cells <- cbind(n_cells,n_DE)
+n_DE_cells <- n_DE_cells[,c("annotation_V1","n","n_DE")]
+```
+
+```{r}
+ggplot(n_DE_cells,aes(x = annotation_V1, y = n_DE/n))+
+  geom_bar(stat = "identity")+RotatedAxis()
+```
+
+## resident and vascular
+
+### vascular
+
+```{r}
+load(paste0(indir,"GBM_RNA_10_vascular_V2p1_alt.Robj"))
+```
+
+```{r}
+Idents(vascular) <- "annotation_V1"
+vascular_DE <- FindAllMarkers(vascular,test.use = "MAST")
+write.table(vascular_DE,file = paste0(outdir,"vascular_res02_DE.tsv"),sep = "\t",col.names = T,row.names = F,quote = F)
+```
+
+```{r}
+Idents(vascular) <- vascular$RNA_snn_res.0.2
+DotPlot(vascular,features = c("Nfib","Sox2","Nes","Foxp2","Igfbp7","Pecam1","Myct1","Col1a1","Col5a2","Dlc1","Pdgfrb","Vtn","Anpep","Acta2","Fos","Bphl","Ttr","Cd63","Mki67","Ptprc","P2ry12","Pdgfra"),cluster.idents = T)+RotatedAxis()
+```
+
+```{r}
+DimPlot(vascular,group.by = "annotation_V1",split.by = "progress")
+DimPlot(vascular,group.by = "annotation_V1")
+```
+```{r}
+n_cells <- vascular@meta.data %>% group_by(annotation_V1) %>% summarise(n=n())
+n_DE <- stromal_markers %>% group_by(cluster) %>% filter(p_val_adj <= 0.01) %>% summarise(n_DE = n())
+n_DE_cells <- cbind(n_cells,n_DE)
+n_DE_cells <- n_DE_cells[,c("annotation_V1","n","n_DE")]
+```
+
+
+```{r}
+ggplot(n_DE_cells,aes(x = annotation_V1, y = n_DE/n))+
+  geom_bar(stat = "identity")+RotatedAxis()
+```
+
+
+
+### resident
+
+```{r}
+load(paste0(indir,"GBM_RNA_10_resident_V2p2_alt.Robj"))
+```
+
+```{r}
+Idents(resident) <- "annotation_V1"
+resident_DE <- FindAllMarkers(resident,test.use = "MAST")
+write.table(resident_DE,file = paste0(outdir,"resident_res01_DE.tsv"),sep = "\t",col.names = T,row.names = F,quote = F)
+```
+
+
+```{r}
+Idents(resident) <- resident$RNA_snn_res.0.1
+DotPlot(resident,features = c("Aqp4","Aldh1l1","Aldoc","Fezf2", "Rorb", "Dbx2","Lhx2","Sox9","Sox10","Olig2","Mag","Pdgfra","Gad2","Bcl11b","Ppp1r1b","Otx2","Pvalb","Sox2","Nes","Foxp2","Igfbp7","Mki67","P2ry12","Ptprc","Pecam1","Myct1","Col1a1","Col5a2","Dlc1","Pdgfrb","Vtn"),cluster.idents = T) + RotatedAxis()+theme(axis.text=element_text(size=8),
+        axis.title=element_text(size=8,face="bold"),
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8))
+```
+
+```{r}
+Idents(resident) <- resident$RNA_snn_res.0.1
+DotPlot(resident,features = c("Aqp4","Aldh1l1","Aldoc","Fezf2", "Rorb", "Dbx2","Lhx2","Sox9","Sox10","Olig2","Mag","Pdgfra","Gad2","Bcl11b","Ppp1r1b","Otx2","Pvalb","Sox2","Nes","Foxp2","Igfbp7","Pecam1","Mki67","P2ry12","Ptprc",""),cluster.idents = T) + RotatedAxis()
+```
+
+
+
+```{r}
+DimPlot(resident,group.by = "annotation_V1",split.by = "progress")
+DimPlot(resident,group.by = "annotation_V1")
+```
+```{r}
+n_cells <- resident@meta.data %>% group_by(annotation_V1) %>% summarise(n=n())
+n_DE <- neuronal_markers %>% group_by(cluster) %>% filter(p_val_adj <= 0.01) %>% summarise(n_DE = n())
+n_DE_cells <- cbind(n_cells,n_DE)
+n_DE_cells <- n_DE_cells[,c("annotation_V1","n","n_DE")]
+```
+
+
+```{r}
+ggplot(n_DE_cells,aes(x = annotation_V1, y = n_DE/n))+
+  geom_bar(stat = "identity")+RotatedAxis()
+```
+
+# fGSEA
+
+## preparation
+
+```{r}
+table(msigdbr(species = "mouse", category = "C4")$gs_subcat)
+```
+
+```{r}
+C4_3CA <- load_gmt(file = paste0("functional_analysis/",list.files("functional_analysis/",pattern = "^c4")))
+fgsea_sets_3CA <- C4_3CA$gene_symbol
+names(fgsea_sets_3CA) <- C4_3CA$set_name
+```
+
+
+```{r prepare gene sets}
+H_df<- msigdbr(species = "Mus musculus", category = "H")
+Imm_df <- msigdbr(species = "Mus musculus", category = "C7",subcategory = "IMMUNESIGDB")
+Celltype_df <- msigdbr(species = "Mus musculus", category = "C8")
+C2_KEGG <- msigdbr(species = "Mus musculus", category = "C2",subcategory = "CP:KEGG")
+C2_React <- msigdbr(species = "Mus musculus", category = "C2",subcategory = "CP:REACTOME")
+
+
+fgsea_sets_Hallmark <- H_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_Imm <- Imm_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_KEGG <- C2_KEGG %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_REACT <- C2_React %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_Celltype <- Celltype_df %>% split(x = .$gene_symbol, f = .$gs_name)
+
+```
+
+
+```{r additional gene sets}
+onco <- msigdbr(species = "Mus musculus", category = "C6")
+fgsea_sets_Onco <- onco %>% split(x = .$gene_symbol, f = .$gs_name)
+```
+
+```{r}
+fgsea_res <- function(cell_type_vector, DE_genes, choose_n = 100, choose_tops = F,gene_set = fgsea_sets_Hallmark,mode = "combined",outdir){
+  if(!dir.exists(outdir)) {dir.create(outdir)}
+  fgsea_res <- list()
+  #DE_selected <- DE_genes %>% group_by(cluster) %>% filter(p_val_adj < 0.05 & abs(avg_log2FC) > 1 & pct.1 > 0.1) %>% mutate(metric = sign(avg_log2FC)*(-log10(p_val_adj))) %>% filter(!is.infinite(metric))
+  DE_selected <- DE_genes %>% mutate(metric = sign(avg_log2FC)*(-log10(p_val_adj))) %>% filter(!is.infinite(metric))
+  if (mode == "simple"){
+    DE_selected <- DE_genes %>% mutate(metric = avg_log2FC) %>% filter(!is.infinite(metric))
+  }
+  for (i in cell_type_vector) {
+    DE <- DE_selected[DE_selected$cluster == i,] %>% arrange(desc(metric)) %>% dplyr::select(gene,metric)
+    if (choose_tops){
+      DE_top <- DE %>% group_by(cluster) %>% slice_max(order_by = metric, n = choose_n)
+      DE_tail <- DE %>% group_by(cluster) %>% slice_min(order_by = metric, n = choose_n)
+      DE <- rbind(DE_top,DE_tail)
+    }
+    DE <- DE %>% arrange(desc(metric)) %>% dplyr::select(gene,metric)
+    rankings <- DE$metric
+    names(rankings) <- DE$gene
+    #print(rankings)
+    plot(rankings)
+    title(main = i)
+    fgseaRes <- fgsea(gene_set, stats = rankings,nPermSimple = 10000)
+    fgseaResTidy <- fgseaRes %>%
+      as_tibble() %>% filter(padj < 0.05 ) %>%
+      arrange(desc(NES))
+  fgsea_res[[i]] <- fgseaResTidy
+  fwrite(fgseaResTidy, file=paste0(outdir,i,"_fgsea.tsv"), sep="\t", sep2=c("", " ", ""))
+  } # need to add name of gene sets to the file name
+   return(fgsea_res)
+}
+```
+
+```{r}
+# define path to DE tables
+# define path to output files
+outdir <- "functional_analysis_alt/"
+```
+
+## glioma cells
+```{r}
+celltype_dir <- "glioma/"
+outdir <- paste0(outdir,celltype_dir)
+dir.create(outdir)
+```
+
+
+```{r load DE genes}
+glioma_markers <- read.table(file = "functional_analysis_alt/glioma_res07_DE.tsv",header = T,sep = "\t")
+```
+
+ 
+### Hallmarks
+
+```{r run fgsea over gene sets}
+glioma_fgsea_hallmark <- fgsea_res(as.character(unique(glioma_markers$cluster)),glioma_markers,gene_set = fgsea_sets_Hallmark,mode = "simple",outdir = paste0(outdir,"Hallmark/"))
+```
+
+```{r consolidate fgsea results}
+Hallmark_vector <- names(fgsea_sets_Hallmark)
+celltype_vector <- as.character(unique(glioma_markers$cluster))
+table_res_glioma <- data.frame(pathway = Hallmark_vector)
+for (i in celltype_vector){
+  table_tmp <- glioma_fgsea_hallmark[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Hallmark_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_glioma <- full_join(table_res_glioma,table_celltype,by = "pathway")
+}
+
+table_res_glioma[is.na(table_res_glioma)] = 0
+table_res_glioma <- table_res_glioma[apply(table_res_glioma[,2:(length(unique(glioma_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_glioma,file = paste0(outdir,"Hallmark/","fgsea_glioma_Hallmark_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### KEGG
+
+```{r run fgsea over gene sets}
+glioma_fgsea_KEGG <- fgsea_res(as.character(unique(glioma_markers$cluster)),glioma_markers,gene_set = fgsea_sets_KEGG,mode = "simple",outdir = paste0(outdir,"KEGG/"))
+```
+
+```{r consolidate fgsea results}
+KEGG_vector <- names(fgsea_sets_KEGG)
+celltype_vector <- as.character(unique(glioma_markers$cluster))
+table_res_glioma <- data.frame(pathway = KEGG_vector)
+for (i in celltype_vector){
+  table_tmp <- glioma_fgsea_KEGG[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% KEGG_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_glioma <- full_join(table_res_glioma,table_celltype,by = "pathway")
+}
+
+table_res_glioma[is.na(table_res_glioma)] = 0
+table_res_glioma <- table_res_glioma[apply(table_res_glioma[,2:(length(unique(glioma_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_glioma,file = paste0(outdir,"KEGG/","fgsea_glioma_KEGG_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### REACTOME
+
+```{r run fgsea over gene sets}
+glioma_fgsea_REACT <- fgsea_res(as.character(unique(glioma_markers$cluster)),glioma_markers,gene_set = fgsea_sets_REACT,mode = "simple",outdir = paste0(outdir,"Reactome/"))
+```
+
+```{r consolidate fgsea results}
+REACT_vector <- names(fgsea_sets_REACT)
+celltype_vector <- as.character(unique(glioma_markers$cluster))
+table_res_glioma <- data.frame(pathway = REACT_vector)
+for (i in celltype_vector){
+  table_tmp <- glioma_fgsea_REACT[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% REACT_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_glioma <- full_join(table_res_glioma,table_celltype,by = "pathway")
+}
+
+table_res_glioma[is.na(table_res_glioma)] = 0
+table_res_glioma <- table_res_glioma[apply(table_res_glioma[,2:(length(unique(glioma_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_glioma,file = paste0(outdir,"Reactome/","fgsea_glioma_REACT_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### 3CA
+
+```{r}
+glioma_fgsea_3CA <- fgsea_res(as.character(unique(glioma_markers$cluster)),glioma_markers,gene_set = fgsea_sets_3CA,mode = "simple",outdir = paste0(outdir,"C4_3CA/"))
+
+C4_3CA_vector <- names(fgsea_sets_3CA)
+celltype_vector <- as.character(unique(glioma_markers$cluster))
+table_res_glioma <- data.frame(pathway = C4_3CA_vector)
+for (i in celltype_vector){
+  table_tmp <- glioma_fgsea_3CA[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% C4_3CA_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_glioma <- full_join(table_res_glioma,table_celltype,by = "pathway")
+}
+
+table_res_glioma[is.na(table_res_glioma)] = 0
+table_res_glioma <- table_res_glioma[apply(table_res_glioma[,2:(length(unique(glioma_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_glioma,file = paste0(outdir,"C4_3CA/","fgsea_glioma_C4-3CA_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### Oncogenic
+
+```{r}
+glioma_fgsea_Onco <- fgsea_res(as.character(unique(glioma_markers$cluster)),glioma_markers,gene_set = fgsea_sets_Onco,mode = "simple",outdir = paste0(outdir,"Oncogenic/"))
+
+Onco_vector <- names(fgsea_sets_Onco)
+celltype_vector <- as.character(unique(glioma_markers$cluster))
+table_res_glioma <- data.frame(pathway = Onco_vector)
+for (i in celltype_vector){
+  table_tmp <- glioma_fgsea_Onco[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Onco_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_glioma <- full_join(table_res_glioma,table_celltype,by = "pathway")
+}
+
+table_res_glioma[is.na(table_res_glioma)] = 0
+table_res_glioma <- table_res_glioma[apply(table_res_glioma[,2:(length(unique(glioma_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_glioma,file = paste0(outdir,"Oncogenic/","fgsea_glioma_Onco_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### cell type
+
+```{r}
+glioma_fgsea_Celltype <- fgsea_res(as.character(unique(glioma_markers$cluster)),glioma_markers,gene_set = fgsea_sets_Celltype,mode = "simple",outdir = paste0(outdir,"Celltype/"))
+
+CellType_vector <- names(fgsea_sets_Celltype)
+celltype_vector <- as.character(unique(glioma_markers$cluster))
+table_res_glioma <- data.frame(pathway = CellType_vector)
+for (i in celltype_vector){
+  table_tmp <- glioma_fgsea_Celltype[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% CellType_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_glioma <- full_join(table_res_glioma,table_celltype,by = "pathway")
+}
+
+table_res_glioma[is.na(table_res_glioma)] = 0
+table_res_glioma <- table_res_glioma[apply(table_res_glioma[,2:(length(unique(glioma_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_glioma,file = paste0(outdir,"Celltype/","fgsea_glioma_celltype_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+## microglia
+
+```{r}
+outdir <- "functional_analysis_alt/"
+celltype_dir <- "microglia/"
+outdir <- paste0(outdir,celltype_dir)
+dir.create(outdir)
+```
+
+```{r load DE genes}
+microglia_markers <- read.table(file = "functional_analysis_alt/microglia_V3_res04_DE.tsv",header = T,sep = "\t")
+```
+
+### Hallmarks
+
+```{r}
+microglia_fgsea_hallmark <- fgsea_res(as.character(unique(microglia_markers$cluster)),microglia_markers,gene_set = fgsea_sets_Hallmark,mode = "simple",outdir = paste0(outdir,"Hallmark/"))
+
+Hallmark_vector <- names(fgsea_sets_Hallmark)
+celltype_vector <- as.character(unique(microglia_markers$cluster))
+table_res_microglia <- data.frame(pathway = Hallmark_vector)
+for (i in celltype_vector){
+  table_tmp <- microglia_fgsea_hallmark[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Hallmark_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_microglia <- full_join(table_res_microglia,table_celltype,by = "pathway")
+}
+
+table_res_microglia[is.na(table_res_microglia)] = 0
+table_res_microglia <- table_res_microglia[apply(table_res_microglia[,2:(length(unique(microglia_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_microglia,file = paste0(outdir,"Hallmark/","fgsea_microglia_Hallmark_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### KEGG 
+
+```{r}
+microglia_fgsea_KEGG <- fgsea_res(as.character(unique(microglia_markers$cluster)),microglia_markers,gene_set = fgsea_sets_KEGG,mode = "simple",outdir = paste0(outdir,"KEGG/"))
+
+KEGG_vector <- names(fgsea_sets_KEGG)
+celltype_vector <- as.character(unique(microglia_markers$cluster))
+table_res_microglia <- data.frame(pathway = KEGG_vector)
+for (i in celltype_vector){
+  table_tmp <- microglia_fgsea_KEGG[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% KEGG_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_microglia <- full_join(table_res_microglia,table_celltype,by = "pathway")
+}
+
+table_res_microglia[is.na(table_res_microglia)] = 0
+table_res_microglia <- table_res_microglia[apply(table_res_microglia[,2:(length(unique(microglia_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_microglia,file = paste0(outdir,"KEGG/","fgsea_microglia_KEGG_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### REACT
+
+```{r}
+microglia_fgsea_REACT <- fgsea_res(as.character(unique(microglia_markers$cluster)),microglia_markers,gene_set = fgsea_sets_REACT,mode = "simple",outdir = paste0(outdir,"Reactome/"))
+
+REACT_vector <- names(fgsea_sets_REACT)
+celltype_vector <- as.character(unique(microglia_markers$cluster))
+table_res_microglia <- data.frame(pathway = REACT_vector)
+for (i in celltype_vector){
+  table_tmp <- microglia_fgsea_REACT[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% REACT_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_microglia <- full_join(table_res_microglia,table_celltype,by = "pathway")
+}
+
+table_res_microglia[is.na(table_res_microglia)] = 0
+table_res_microglia <- table_res_microglia[apply(table_res_microglia[,2:(length(unique(microglia_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_microglia,file = paste0(outdir,"Reactome/","fgsea_microglia_Reactome_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+
+### celltype
+
+```{r}
+microglia_fgsea_celltype <- fgsea_res(as.character(unique(microglia_markers$cluster)),microglia_markers,gene_set = fgsea_sets_Celltype,mode = "simple",outdir = paste0(outdir,"Celltype/"))
+
+CellType_vector <- names(fgsea_sets_Celltype)
+celltype_vector <- as.character(unique(microglia_markers$cluster))
+table_res_microglia <- data.frame(pathway = CellType_vector)
+for (i in celltype_vector){
+  table_tmp <- microglia_fgsea_celltype[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% CellType_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_microglia <- full_join(table_res_microglia,table_celltype,by = "pathway")
+}
+
+table_res_microglia[is.na(table_res_microglia)] = 0
+table_res_microglia <- table_res_microglia[apply(table_res_microglia[,2:(length(unique(microglia_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_microglia,file = paste0(outdir,"Celltype/","fgsea_microglia_Celltype_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### immunogenic
+
+```{r}
+microglia_fgsea_imm <- fgsea_res(as.character(unique(microglia_markers$cluster)),microglia_markers,gene_set = fgsea_sets_Imm,mode = "simple",outdir = paste0(outdir,"Immunogenic/"))
+
+imm_vector <- names(fgsea_sets_Imm)
+celltype_vector <- as.character(unique(microglia_markers$cluster))
+table_res_microglia <- data.frame(pathway = imm_vector)
+for (i in celltype_vector){
+  table_tmp <- microglia_fgsea_imm[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% imm_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_microglia <- full_join(table_res_microglia,table_celltype,by = "pathway")
+}
+
+table_res_microglia[is.na(table_res_microglia)] = 0
+table_res_microglia <- table_res_microglia[apply(table_res_microglia[,2:(length(unique(microglia_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_microglia,file = paste0(outdir,"Immunogenic/","fgsea_microglia_Immunogenic_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+## myeloids
+
+```{r}
+outdir <- "functional_analysis_alt/"
+celltype_dir <- "myeloid/"
+outdir <- paste0(outdir,celltype_dir)
+dir.create(outdir)
+```
+
+
+```{r load DE genes}
+myeloid_markers <- read.table(file = "functional_analysis_alt/myeloid_V3_res08_DE.tsv",header = T,sep = "\t")
+```
+
+### Hallmarks
+
+```{r}
+myeloid_fgsea_hallmark <- fgsea_res(as.character(unique(myeloid_markers$cluster)),myeloid_markers,gene_set = fgsea_sets_Hallmark,mode = "simple",outdir = paste0(outdir,"Hallmark/"))
+
+Hallmark_vector <- names(fgsea_sets_Hallmark)
+celltype_vector <- as.character(unique(myeloid_markers$cluster))
+table_res_myeloid <- data.frame(pathway = Hallmark_vector)
+for (i in celltype_vector){
+  table_tmp <- myeloid_fgsea_hallmark[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Hallmark_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_myeloid <- full_join(table_res_myeloid,table_celltype,by = "pathway")
+}
+
+table_res_myeloid[is.na(table_res_myeloid)] = 0
+table_res_myeloid <- table_res_myeloid[apply(table_res_myeloid[,2:(length(unique(myeloid_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_myeloid,file = paste0(outdir,"Hallmark/","fgsea_myeloid_Hallmark_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### KEGG 
+
+```{r}
+myeloid_fgsea_KEGG <- fgsea_res(as.character(unique(myeloid_markers$cluster)),myeloid_markers,gene_set = fgsea_sets_KEGG,mode = "simple",outdir = paste0(outdir,"KEGG/"))
+
+KEGG_vector <- names(fgsea_sets_KEGG)
+celltype_vector <- as.character(unique(myeloid_markers$cluster))
+table_res_myeloid <- data.frame(pathway = KEGG_vector)
+for (i in celltype_vector){
+  table_tmp <- myeloid_fgsea_KEGG[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% KEGG_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_myeloid <- full_join(table_res_myeloid,table_celltype,by = "pathway")
+}
+
+table_res_myeloid[is.na(table_res_myeloid)] = 0
+table_res_myeloid <- table_res_myeloid[apply(table_res_myeloid[,2:(length(unique(myeloid_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_myeloid,file = paste0(outdir,"KEGG/","fgsea_myeloid_KEGG_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### REACT
+
+```{r}
+myeloid_fgsea_REACT <- fgsea_res(as.character(unique(myeloid_markers$cluster)),myeloid_markers,gene_set = fgsea_sets_REACT,mode = "simple",outdir = paste0(outdir,"Reactome/"))
+
+REACT_vector <- names(fgsea_sets_REACT)
+celltype_vector <- as.character(unique(myeloid_markers$cluster))
+table_res_myeloid <- data.frame(pathway = REACT_vector)
+for (i in celltype_vector){
+  table_tmp <- myeloid_fgsea_REACT[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% REACT_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_myeloid <- full_join(table_res_myeloid,table_celltype,by = "pathway")
+}
+
+table_res_myeloid[is.na(table_res_myeloid)] = 0
+table_res_myeloid <- table_res_myeloid[apply(table_res_myeloid[,2:(length(unique(myeloid_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_myeloid,file = paste0(outdir,"Reactome/","fgsea_myeloid_Reactome_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+
+### celltype
+
+```{r}
+myeloid_fgsea_celltype <- fgsea_res(as.character(unique(myeloid_markers$cluster)),myeloid_markers,gene_set = fgsea_sets_Celltype,mode = "simple",outdir = paste0(outdir,"Celltype/"))
+
+CellType_vector <- names(fgsea_sets_Celltype)
+celltype_vector <- as.character(unique(myeloid_markers$cluster))
+table_res_myeloid <- data.frame(pathway = CellType_vector)
+for (i in celltype_vector){
+  table_tmp <- myeloid_fgsea_celltype[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% CellType_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_myeloid <- full_join(table_res_myeloid,table_celltype,by = "pathway")
+}
+
+table_res_myeloid[is.na(table_res_myeloid)] = 0
+table_res_myeloid <- table_res_myeloid[apply(table_res_myeloid[,2:(length(unique(myeloid_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_myeloid,file = paste0(outdir,"Celltype/","fgsea_myeloid_Celltype_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### immunogenic
+
+```{r}
+myeloid_fgsea_imm <- fgsea_res(as.character(unique(myeloid_markers$cluster)),myeloid_markers,gene_set = fgsea_sets_Imm,mode = "simple",outdir = paste0(outdir,"Immunogenic/"))
+
+imm_vector <- names(fgsea_sets_Imm)
+celltype_vector <- as.character(unique(myeloid_markers$cluster))
+table_res_myeloid <- data.frame(pathway = imm_vector)
+for (i in celltype_vector){
+  table_tmp <- myeloid_fgsea_imm[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% imm_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_myeloid <- full_join(table_res_myeloid,table_celltype,by = "pathway")
+}
+
+table_res_myeloid[is.na(table_res_myeloid)] = 0
+table_res_myeloid <- table_res_myeloid[apply(table_res_myeloid[,2:(length(unique(myeloid_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_myeloid,file = paste0(outdir,"Immunogenic/","fgsea_myeloid_Immunogenic_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+## lymphoid
+
+```{r}
+outdir <- "functional_analysis_alt/"
+celltype_dir <- "lymphoid/"
+outdir <- paste0(outdir,celltype_dir)
+dir.create(outdir)
+```
+
+
+```{r load DE genes}
+lymphoid_markers <- read.table(file = "functional_analysis_alt/lymphoid_V3_res07_DE.tsv",header = T,sep = "\t")
+```
+
+### Hallmarks
+
+```{r}
+lymphoid_fgsea_hallmark <- fgsea_res(as.character(unique(lymphoid_markers$cluster)),lymphoid_markers,gene_set = fgsea_sets_Hallmark,mode = "simple",outdir = paste0(outdir,"Hallmark/"))
+
+Hallmark_vector <- names(fgsea_sets_Hallmark)
+celltype_vector <- as.character(unique(lymphoid_markers$cluster))
+table_res_lymphoid <- data.frame(pathway = Hallmark_vector)
+for (i in celltype_vector){
+  table_tmp <- lymphoid_fgsea_hallmark[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Hallmark_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_lymphoid <- full_join(table_res_lymphoid,table_celltype,by = "pathway")
+}
+
+table_res_lymphoid[is.na(table_res_lymphoid)] = 0
+table_res_lymphoid <- table_res_lymphoid[apply(table_res_lymphoid[,2:(length(unique(lymphoid_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_lymphoid,file = paste0(outdir,"Hallmark/","fgsea_lymphoid_Hallmark_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### KEGG 
+
+```{r}
+lymphoid_fgsea_KEGG <- fgsea_res(as.character(unique(lymphoid_markers$cluster)),lymphoid_markers,gene_set = fgsea_sets_KEGG,mode = "simple",outdir = paste0(outdir,"KEGG/"))
+
+KEGG_vector <- names(fgsea_sets_KEGG)
+celltype_vector <- as.character(unique(lymphoid_markers$cluster))
+table_res_lymphoid <- data.frame(pathway = KEGG_vector)
+for (i in celltype_vector){
+  table_tmp <- lymphoid_fgsea_KEGG[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% KEGG_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_lymphoid <- full_join(table_res_lymphoid,table_celltype,by = "pathway")
+}
+
+table_res_lymphoid[is.na(table_res_lymphoid)] = 0
+table_res_lymphoid <- table_res_lymphoid[apply(table_res_lymphoid[,2:(length(unique(lymphoid_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_lymphoid,file = paste0(outdir,"KEGG/","fgsea_lymphoid_KEGG_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### REACT
+
+```{r}
+lymphoid_fgsea_REACT <- fgsea_res(as.character(unique(lymphoid_markers$cluster)),lymphoid_markers,gene_set = fgsea_sets_REACT,mode = "simple",outdir = paste0(outdir,"Reactome/"))
+
+REACT_vector <- names(fgsea_sets_REACT)
+celltype_vector <- as.character(unique(lymphoid_markers$cluster))
+table_res_lymphoid <- data.frame(pathway = REACT_vector)
+for (i in celltype_vector){
+  table_tmp <- lymphoid_fgsea_REACT[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% REACT_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_lymphoid <- full_join(table_res_lymphoid,table_celltype,by = "pathway")
+}
+
+table_res_lymphoid[is.na(table_res_lymphoid)] = 0
+table_res_lymphoid <- table_res_lymphoid[apply(table_res_lymphoid[,2:(length(unique(lymphoid_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_lymphoid,file = paste0(outdir,"Reactome/","fgsea_lymphoid_Reactome_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### celltype
+
+```{r}
+lymphoid_fgsea_celltype <- fgsea_res(as.character(unique(lymphoid_markers$cluster)),lymphoid_markers,gene_set = fgsea_sets_Celltype,mode = "simple",outdir = paste0(outdir,"Celltype/"))
+
+CellType_vector <- names(fgsea_sets_Celltype)
+celltype_vector <- as.character(unique(lymphoid_markers$cluster))
+table_res_lymphoid <- data.frame(pathway = CellType_vector)
+for (i in celltype_vector){
+  table_tmp <- lymphoid_fgsea_celltype[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% CellType_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_lymphoid <- full_join(table_res_lymphoid,table_celltype,by = "pathway")
+}
+
+table_res_lymphoid[is.na(table_res_lymphoid)] = 0
+table_res_lymphoid <- table_res_lymphoid[apply(table_res_lymphoid[,2:(length(unique(lymphoid_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_lymphoid,file = paste0(outdir,"Celltype/","fgsea_lymphoid_Celltype_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### immunogenic
+
+```{r}
+lymphoid_fgsea_imm <- fgsea_res(as.character(unique(lymphoid_markers$cluster)),lymphoid_markers,gene_set = fgsea_sets_Imm,mode = "simple",outdir = paste0(outdir,"Immunogenic/"))
+
+imm_vector <- names(fgsea_sets_Imm)
+celltype_vector <- as.character(unique(lymphoid_markers$cluster))
+table_res_lymphoid <- data.frame(pathway = imm_vector)
+for (i in celltype_vector){
+  table_tmp <- lymphoid_fgsea_imm[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% imm_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_lymphoid <- full_join(table_res_lymphoid,table_celltype,by = "pathway")
+}
+
+table_res_lymphoid[is.na(table_res_lymphoid)] = 0
+table_res_lymphoid <- table_res_lymphoid[apply(table_res_lymphoid[,2:(length(unique(lymphoid_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_lymphoid,file = paste0(outdir,"Immunogenic/","fgsea_lymphoid_Immunogenic_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+## neuronal/resident
+
+```{r}
+outdir <- "functional_analysis_alt/"
+celltype_dir <- "neuronal/"
+outdir <- paste0(outdir,celltype_dir)
+dir.create(outdir)
+```
+
+
+```{r load DE genes}
+neuronal_markers <- read.table(file = "functional_analysis_alt/resident_res01_DE.tsv",header = T,sep = "\t")
+```
+
+### Hallmarks
+
+```{r}
+neuronal_fgsea_hallmark <- fgsea_res(as.character(unique(neuronal_markers$cluster)),neuronal_markers,gene_set = fgsea_sets_Hallmark,mode = "simple",outdir = paste0(outdir,"Hallmark/"))
+
+Hallmark_vector <- names(fgsea_sets_Hallmark)
+celltype_vector <- as.character(unique(neuronal_markers$cluster))
+table_res_neuronal <- data.frame(pathway = Hallmark_vector)
+for (i in celltype_vector){
+  table_tmp <- neuronal_fgsea_hallmark[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Hallmark_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_neuronal <- full_join(table_res_neuronal,table_celltype,by = "pathway")
+}
+
+table_res_neuronal[is.na(table_res_neuronal)] = 0
+table_res_neuronal <- table_res_neuronal[apply(table_res_neuronal[,2:(length(unique(neuronal_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_neuronal,file = paste0(outdir,"Hallmark/","fgsea_neuronal_Hallmark_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### KEGG 
+
+```{r}
+neuronal_fgsea_KEGG <- fgsea_res(as.character(unique(neuronal_markers$cluster)),neuronal_markers,gene_set = fgsea_sets_KEGG,mode = "simple",outdir = paste0(outdir,"KEGG/"))
+
+KEGG_vector <- names(fgsea_sets_KEGG)
+celltype_vector <- as.character(unique(neuronal_markers$cluster))
+table_res_neuronal <- data.frame(pathway = KEGG_vector)
+for (i in celltype_vector){
+  table_tmp <- neuronal_fgsea_KEGG[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% KEGG_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_neuronal <- full_join(table_res_neuronal,table_celltype,by = "pathway")
+}
+
+table_res_neuronal[is.na(table_res_neuronal)] = 0
+table_res_neuronal <- table_res_neuronal[apply(table_res_neuronal[,2:(length(unique(neuronal_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_neuronal,file = paste0(outdir,"KEGG/","fgsea_neuronal_KEGG_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### REACT
+
+```{r}
+neuronal_fgsea_REACT <- fgsea_res(as.character(unique(neuronal_markers$cluster)),neuronal_markers,gene_set = fgsea_sets_REACT,mode = "simple",outdir = paste0(outdir,"Reactome/"))
+
+REACT_vector <- names(fgsea_sets_REACT)
+celltype_vector <- as.character(unique(neuronal_markers$cluster))
+table_res_neuronal <- data.frame(pathway = REACT_vector)
+for (i in celltype_vector){
+  table_tmp <- neuronal_fgsea_REACT[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% REACT_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_neuronal <- full_join(table_res_neuronal,table_celltype,by = "pathway")
+}
+
+table_res_neuronal[is.na(table_res_neuronal)] = 0
+table_res_neuronal <- table_res_neuronal[apply(table_res_neuronal[,2:(length(unique(neuronal_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_neuronal,file = paste0(outdir,"Reactome/","fgsea_neuronal_Reactome_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### celltype
+
+```{r}
+neuronal_fgsea_celltype <- fgsea_res(as.character(unique(neuronal_markers$cluster)),neuronal_markers,gene_set = fgsea_sets_Celltype,mode = "simple",outdir = paste0(outdir,"Celltype/"))
+
+CellType_vector <- names(fgsea_sets_Celltype)
+celltype_vector <- as.character(unique(neuronal_markers$cluster))
+table_res_neuronal <- data.frame(pathway = CellType_vector)
+for (i in celltype_vector){
+  table_tmp <- neuronal_fgsea_celltype[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% CellType_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_neuronal <- full_join(table_res_neuronal,table_celltype,by = "pathway")
+}
+
+table_res_neuronal[is.na(table_res_neuronal)] = 0
+table_res_neuronal <- table_res_neuronal[apply(table_res_neuronal[,2:(length(unique(neuronal_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_neuronal,file = paste0(outdir,"Celltype/","fgsea_neuronal_Celltype_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### immunogenic
+
+```{r}
+neuronal_fgsea_imm <- fgsea_res(as.character(unique(neuronal_markers$cluster)),neuronal_markers,gene_set = fgsea_sets_Imm,mode = "simple",outdir = paste0(outdir,"Immunogenic/"))
+
+imm_vector <- names(fgsea_sets_Imm)
+celltype_vector <- as.character(unique(neuronal_markers$cluster))
+table_res_neuronal <- data.frame(pathway = imm_vector)
+for (i in celltype_vector){
+  table_tmp <- neuronal_fgsea_imm[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% imm_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_neuronal <- full_join(table_res_neuronal,table_celltype,by = "pathway")
+}
+
+table_res_neuronal[is.na(table_res_neuronal)] = 0
+table_res_neuronal <- table_res_neuronal[apply(table_res_neuronal[,2:(length(unique(neuronal_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_neuronal,file = paste0(outdir,"Immunogenic/","fgsea_neuronal_Immunogenic_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+## stromal/vascular
+
+
+```{r}
+outdir <- "functional_analysis_alt/"
+celltype_dir <- "stromal/"
+outdir <- paste0(outdir,celltype_dir)
+dir.create(outdir)
+```
+
+
+```{r load DE genes}
+stromal_markers <- read.table(file = "functional_analysis_alt/vascular_res02_DE.tsv",header = T,sep = "\t")
+```
+
+
+### Hallmarks
+
+```{r}
+stromal_fgsea_hallmark <- fgsea_res(as.character(unique(stromal_markers$cluster)),stromal_markers,gene_set = fgsea_sets_Hallmark,mode = "simple",outdir = paste0(outdir,"Hallmark/"))
+
+Hallmark_vector <- names(fgsea_sets_Hallmark)
+celltype_vector <- as.character(unique(stromal_markers$cluster))
+table_res_stromal <- data.frame(pathway = Hallmark_vector)
+for (i in celltype_vector){
+  table_tmp <- stromal_fgsea_hallmark[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Hallmark_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_stromal <- full_join(table_res_stromal,table_celltype,by = "pathway")
+}
+
+table_res_stromal[is.na(table_res_stromal)] = 0
+table_res_stromal <- table_res_stromal[apply(table_res_stromal[,2:(length(unique(stromal_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_stromal,file = paste0(outdir,"Hallmark/","fgsea_stromal_Hallmark_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### KEGG 
+
+```{r}
+stromal_fgsea_KEGG <- fgsea_res(as.character(unique(stromal_markers$cluster)),stromal_markers,gene_set = fgsea_sets_KEGG,mode = "simple",outdir = paste0(outdir,"KEGG/"))
+
+KEGG_vector <- names(fgsea_sets_KEGG)
+celltype_vector <- as.character(unique(stromal_markers$cluster))
+table_res_stromal <- data.frame(pathway = KEGG_vector)
+for (i in celltype_vector){
+  table_tmp <- stromal_fgsea_KEGG[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% KEGG_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_stromal <- full_join(table_res_stromal,table_celltype,by = "pathway")
+}
+
+table_res_stromal[is.na(table_res_stromal)] = 0
+table_res_stromal <- table_res_stromal[apply(table_res_stromal[,2:(length(unique(stromal_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_stromal,file = paste0(outdir,"KEGG/","fgsea_stromal_KEGG_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### REACT
+
+```{r}
+stromal_fgsea_REACT <- fgsea_res(as.character(unique(stromal_markers$cluster)),stromal_markers,gene_set = fgsea_sets_REACT,mode = "simple",outdir = paste0(outdir,"Reactome/"))
+
+REACT_vector <- names(fgsea_sets_REACT)
+celltype_vector <- as.character(unique(stromal_markers$cluster))
+table_res_stromal <- data.frame(pathway = REACT_vector)
+for (i in celltype_vector){
+  table_tmp <- stromal_fgsea_REACT[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% REACT_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_stromal <- full_join(table_res_stromal,table_celltype,by = "pathway")
+}
+
+table_res_stromal[is.na(table_res_stromal)] = 0
+table_res_stromal <- table_res_stromal[apply(table_res_stromal[,2:(length(unique(stromal_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_stromal,file = paste0(outdir,"Reactome/","fgsea_stromal_Reactome_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### celltype
+
+```{r}
+stromal_fgsea_celltype <- fgsea_res(as.character(unique(stromal_markers$cluster)),stromal_markers,gene_set = fgsea_sets_Celltype,mode = "simple",outdir = paste0(outdir,"Celltype/"))
+
+CellType_vector <- names(fgsea_sets_Celltype)
+celltype_vector <- as.character(unique(stromal_markers$cluster))
+table_res_stromal <- data.frame(pathway = CellType_vector)
+for (i in celltype_vector){
+  table_tmp <- stromal_fgsea_celltype[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% CellType_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_stromal <- full_join(table_res_stromal,table_celltype,by = "pathway")
+}
+
+table_res_stromal[is.na(table_res_stromal)] = 0
+table_res_stromal <- table_res_stromal[apply(table_res_stromal[,2:(length(unique(stromal_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_stromal,file = paste0(outdir,"Celltype/","fgsea_stromal_Celltype_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### immunogenic
+
+```{r}
+stromal_fgsea_imm <- fgsea_res(as.character(unique(stromal_markers$cluster)),stromal_markers,gene_set = fgsea_sets_Imm,mode = "simple",outdir = paste0(outdir,"Immunogenic/"))
+
+imm_vector <- names(fgsea_sets_Imm)
+celltype_vector <- as.character(unique(stromal_markers$cluster))
+table_res_stromal <- data.frame(pathway = imm_vector)
+for (i in celltype_vector){
+  table_tmp <- stromal_fgsea_imm[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% imm_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res_stromal <- full_join(table_res_stromal,table_celltype,by = "pathway")
+}
+
+table_res_stromal[is.na(table_res_stromal)] = 0
+table_res_stromal <- table_res_stromal[apply(table_res_stromal[,2:(length(unique(stromal_markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res_stromal,file = paste0(outdir,"Immunogenic/","fgsea_stromal_Immunogenic_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+

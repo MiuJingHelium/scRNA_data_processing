@@ -1,0 +1,326 @@
+---
+title: "T cells analysis"
+output: html_document
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony)
+```
+
+
+```{r}
+indir = "./R_outs/" #Can be made into a command-line input
+outdir = "./R_outs/"
+```
+
+```{r}
+load(paste0(outdir,"whole_processed_wHarmony.Robj"))
+```
+
+## Divide two subsets: CD3e high and Cd3e low for further clustering
+
+
+```{r}
+VlnPlot(whole, features = "Cd3e",group.by="RNA_snn_res.0.1")
+```
+
+```{r}
+Idents(whole) <- whole$RNA_snn_res.0.1
+CD3E_high <- subset(whole, idents = c(0,1,2,4,8))
+CD3E_low <- subset(whole, idents = c(3,5,6,7,9))
+```
+
+```{r}
+table(CD3E_high$RNA_snn_res.0.1)
+table(CD3E_low$RNA_snn_res.0.1)
+```
+
+## Re-process the two subsets
+
+### CD3E high
+
+I'll re-run the steps because of change in sample space; variable genes will be different (and are expected to be different)
+
+```{r}
+CD3E_high <- FindVariableFeatures(object = CD3E_high, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD3E_high) <-  VariableFeatures(CD3E_high) [!grepl("^TRA|^TRB|^IGH|^IGK|MAMU-A", VariableFeatures(CD3E_high))]
+VariableFeaturePlot(CD3E_high)
+CD3E_high <- ScaleData(object = CD3E_high, features = VariableFeatures(object = CD3E_high), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD3E_high <- RunPCA(object = CD3E_high,
+                features =  VariableFeatures(object = CD3E_high),
+                dims = 1:30)
+gc()
+ElbowPlot(CD3E_high,ndims = 30)
+CD3E_high <- RunHarmony(object = CD3E_high, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD3E_high <- RunUMAP(CD3E_high,dims = 1:20,reduction = "harmony")
+CD3E_high <- RunTSNE(CD3E_high,dims = 1:20,reduction = "harmony")
+
+CD3E_high <- FindNeighbors(CD3E_high, dims = 1:20,reduction = "harmony")
+  
+CD3E_high <- FindClusters(object = CD3E_high, resolution = 0.1)
+gc()
+```
+
+```{r}
+DimPlot(CD3E_high,reduction = "umap")
+```
+```{r}
+DotPlot(CD3E_high,features = c("Cd3e","Cd4","Cd8a"))+RotatedAxis()
+```
+
+```{r}
+save(CD3E_high,file = paste0(outdir,"CD3E_high.Robj"))
+```
+
+### CD3E low
+
+```{r}
+CD3E_low <- FindVariableFeatures(object = CD3E_low, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD3E_low) <-  VariableFeatures(CD3E_low) [!grepl("^TRA|^TRB|^IGH|^IGK|MAMU-A", VariableFeatures(CD3E_low))]
+VariableFeaturePlot(CD3E_low)
+CD3E_low <- ScaleData(object = CD3E_low, features = VariableFeatures(object = CD3E_low), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD3E_low <- RunPCA(object = CD3E_low,
+                features =  VariableFeatures(object = CD3E_low),
+                dims = 1:30)
+gc()
+ElbowPlot(CD3E_low,ndims = 30)
+CD3E_low <- RunHarmony(object = CD3E_low, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD3E_low <- RunUMAP(CD3E_low,dims = 1:20,reduction = "harmony")
+CD3E_low <- RunTSNE(CD3E_low,dims = 1:20,reduction = "harmony")
+
+CD3E_low <- FindNeighbors(CD3E_low, dims = 1:20,reduction = "harmony")
+  
+CD3E_low <- FindClusters(object = CD3E_low, resolution = 0.1)
+gc()
+```
+
+```{r}
+DimPlot(CD3E_low,reduction = "umap")
+
+```
+
+
+```{r}
+DotPlot(CD3E_low,features = c("Cd3e","Cd4","Cd8a"))+RotatedAxis()
+```
+
+```{r}
+save(CD3E_low,file = paste0(outdir,"CD3E_low.Robj"))
+```
+
+### Isolation and merging
+
+```{r}
+Cd3e_high_c2 <- subset(CD3E_high, idents = 2)
+```
+
+```{r}
+table(Cd3e_high_c2$seurat_clusters)
+```
+
+```{r}
+CD3E_high <- subset(CD3E_high, idents = c(0,1,3,4))
+table(CD3E_high$seurat_clusters)
+```
+
+```{r}
+Cd3e_low_high <- subset(CD3E_low,idents = c(2,4,5))
+table(Cd3e_low_high$seurat_clusters)
+```
+
+```{r}
+CD3E_low <- subset(CD3E_low,idents = c(0,1,3,6,7,8))
+table(CD3E_low$seurat_clusters)
+```
+
+#### merge
+```{r}
+CD3E_high <- merge(CD3E_high,Cd3e_low_high)
+CD3E_low <- merge(CD3E_low,Cd3e_high_c2)
+```
+
+## Process again
+
+Note: previously merging will remove the previous processed layers. This does not seem to be the case for seurat 5
+
+```{r}
+CD3E_high <- FindVariableFeatures(object = CD3E_high, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD3E_high) <-  VariableFeatures(CD3E_high) [!grepl("^TRA|^TRB|^IGH|^IGK|MAMU-A", VariableFeatures(CD3E_high))]
+VariableFeaturePlot(CD3E_high)
+CD3E_high <- ScaleData(object = CD3E_high, features = VariableFeatures(object = CD3E_high), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD3E_high <- RunPCA(object = CD3E_high,
+                features =  VariableFeatures(object = CD3E_high),
+                dims = 1:30)
+gc()
+ElbowPlot(CD3E_high,ndims = 30)
+CD3E_high <- RunHarmony(object = CD3E_high, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD3E_high <- RunUMAP(CD3E_high,dims = 1:20,reduction = "harmony")
+CD3E_high <- RunTSNE(CD3E_high,dims = 1:20,reduction = "harmony")
+
+CD3E_high <- FindNeighbors(CD3E_high, dims = 1:20,reduction = "harmony")
+  
+CD3E_high <- FindClusters(object = CD3E_high, resolution = 0.1)
+gc()
+```
+
+```{r}
+DimPlot(CD3E_high,reduction = "umap")
+DotPlot(CD3E_high,features = c("Cd3e","Cd4","Cd8a"))+RotatedAxis()
+```
+```{r}
+save(CD3E_high,file = paste0(outdir,"CD3E_high.Robj"))
+```
+
+```{r}
+CD3E_low <- FindVariableFeatures(object = CD3E_low, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD3E_low) <-  VariableFeatures(CD3E_low) [!grepl("^TRA|^TRB|^IGH|^IGK|MAMU-A", VariableFeatures(CD3E_low))]
+VariableFeaturePlot(CD3E_low)
+CD3E_low <- ScaleData(object = CD3E_low, features = VariableFeatures(object = CD3E_low), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD3E_low <- RunPCA(object = CD3E_low,
+                features =  VariableFeatures(object = CD3E_low),
+                dims = 1:30)
+gc()
+ElbowPlot(CD3E_low,ndims = 30)
+CD3E_low <- RunHarmony(object = CD3E_low, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD3E_low <- RunUMAP(CD3E_low,dims = 1:20,reduction = "harmony")
+CD3E_low <- RunTSNE(CD3E_low,dims = 1:20,reduction = "harmony")
+
+CD3E_low <- FindNeighbors(CD3E_low, dims = 1:20,reduction = "harmony")
+  
+CD3E_low <- FindClusters(object = CD3E_low, resolution = 0.1)
+gc()
+```
+
+
+```{r}
+DimPlot(CD3E_low,reduction = "umap")
+DotPlot(CD3E_low,features = c("Cd3e","Cd4","Cd8a"))+RotatedAxis()
+```
+
+```{r}
+save(CD3E_low,file = paste0(outdir,"CD3E_low.Robj"))
+```
+
+
+### merging and isolation again
+
+```{r}
+load(paste0(outdir,"CD3E_low.Robj"))
+load(paste0(outdir,"CD3E_high.Robj"))
+```
+
+```{r}
+DotPlot(CD3E_high,features = c("Cd3e","Cd4","Cd8a","Siglech","Ncr1","Adgre1","S100a8","Cd19"))+RotatedAxis()
+DotPlot(CD3E_low,features = c("Cd3e","Cd4","Cd8a","Siglech","Ncr1","Adgre1","S100a8","Cd19"))+RotatedAxis()
+```
+
+```{r}
+table(CD3E_high$seurat_clusters)
+table(CD3E_low$seurat_clusters)
+```
+
+
+
+```{r}
+FeaturePlot(CD3E_high,features = c("Cd3e","Adgre1"))
+FeaturePlot(CD3E_high,features = c("Cd4"),label = T)
+FeaturePlot(CD3E_high,features = c("Cd8a"),label = T)
+FeaturePlot(CD3E_high,features = "nFeature_RNA",min.cutoff = 5000)
+```
+
+```{r}
+FeaturePlot(CD3E_low,features = c("Cd3e","Adgre1"))
+FeaturePlot(CD3E_low,features = "nFeature_RNA",min.cutoff = 5000)
+```
+
+
+```{r}
+B_mixture <- subset(CD3E_high,idents = 7)
+pDC <- subset(CD3E_high,idents = 5)
+CD3E_high <- subset(CD3E_high, idents = seq(0,8,1)[!seq(0,8,1) %in% c(5,7)])
+```
+
+```{r}
+NK <- subset(CD3E_low,idents = c(0,5))
+CD3E_low <- subset(CD3E_low, idents = seq(0,6,1)[!seq(0,6,1) %in% c(0,5)])
+```
+
+
+Now, the previous CD3E_high is divided into three portions, and CD3E_low is divided to two portions. We want to look at each portion individually before merging them back.Instead of arbiturary doublet removal,removing transcriptionally vague clusters may be also a way.
+
+We may want to see if we can further isolate mixtures.
+
+```{r}
+CD3E_high <- FindVariableFeatures(object = CD3E_high, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD3E_high) <-  VariableFeatures(CD3E_high) [!grepl("^TRA|^TRB|^IGH|^IGK|MAMU-A", VariableFeatures(CD3E_high))]
+VariableFeaturePlot(CD3E_high)
+CD3E_high <- ScaleData(object = CD3E_high, features = VariableFeatures(object = CD3E_high), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD3E_high <- RunPCA(object = CD3E_high,
+                features =  VariableFeatures(object = CD3E_high),
+                dims = 1:30)
+gc()
+ElbowPlot(CD3E_high,ndims = 30)
+CD3E_high <- RunHarmony(object = CD3E_high, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD3E_high <- RunUMAP(CD3E_high,dims = 1:20,reduction = "harmony")
+CD3E_high <- RunTSNE(CD3E_high,dims = 1:20,reduction = "harmony")
+
+CD3E_high <- FindNeighbors(CD3E_high, dims = 1:20,reduction = "harmony")
+  
+CD3E_high <- FindClusters(object = CD3E_high, resolution = 0.1)
+gc()
+```
+
+```{r}
+CD3E_low <- FindVariableFeatures(object = CD3E_low, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(CD3E_low) <-  VariableFeatures(CD3E_low) [!grepl("^TRA|^TRB|^IGH|^IGK|MAMU-A", VariableFeatures(CD3E_low))]
+VariableFeaturePlot(CD3E_low)
+CD3E_low <- ScaleData(object = CD3E_low, features = VariableFeatures(object = CD3E_low), vars.to.regress = c("nCount_RNA", "percent.mt"))
+CD3E_low <- RunPCA(object = CD3E_low,
+                features =  VariableFeatures(object = CD3E_low),
+                dims = 1:30)
+gc()
+ElbowPlot(CD3E_low,ndims = 30)
+CD3E_low <- RunHarmony(object = CD3E_low, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+CD3E_low <- RunUMAP(CD3E_low,dims = 1:20,reduction = "harmony")
+CD3E_low <- RunTSNE(CD3E_low,dims = 1:20,reduction = "harmony")
+
+CD3E_low <- FindNeighbors(CD3E_low, dims = 1:20,reduction = "harmony")
+  
+CD3E_low <- FindClusters(object = CD3E_low, resolution = 0.1)
+gc()
+```
+
+
+
+```{r}
+DotPlot(CD3E_high,features = c("Cd3e","Cd4","Cd8a","Siglech","Ncr1","Adgre1","S100a8","Cd19"))+RotatedAxis()
+DotPlot(CD3E_low,features = c("Cd3e","Cd4","Cd8a","Siglech","Ncr1","Adgre1","S100a8","Cd19"))+RotatedAxis()
+```
+
+```{r}
+CD3E_high_mixture <- subset(CD3E_high,idents = c(5,6))
+NK_2 <- subset(CD3E_low,idents = c(3))
+CD3E_high <- subset(CD3E_high, idents = seq(0,6,1)[!seq(0,6,1) %in% c(5,6)])
+CD3E_low <- subset(CD3E_low, idents = seq(0,6,1)[!seq(0,6,1) %in% c(3)])
+```
+
+```{r}
+B_mixture <- JoinLayers(B_mixture)
+pDC <- JoinLayers(pDC)
+CD3E_high_mixture <- JoinLayers(CD3E_high_mixture)
+NK <- JoinLayers(NK)
+NK_2 <- JoinLayers(NK_2)
+```
+
+
+Now merge the mixtures. Merge B_mixture, pDC and CD3E_high_mixture. Mixture two NK mixtures. 
+```{r}
+
+CD3E_high_mixture <- merge(CD3E_high_mixture , y = c(B_mixture,pDC))
+NK_mixture <- merge(NK,NK_2)
+```
+
+
+

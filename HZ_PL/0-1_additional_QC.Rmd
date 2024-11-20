@@ -1,0 +1,373 @@
+---
+title: "0-1_additional_QC"
+output: html_document
+date: "2024-08-13"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(miQC)
+library(SeuratWrappers) # for miQC
+library(harmony) # for integration
+```
+
+```{r}
+# template palette for > 40 labels
+library(RColorBrewer)
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+```
+
+```{r}
+indir <- "raw/"
+outdir <- "RDS/"
+if (!dir.exists(outdir)) dir.create(outdir)
+```
+
+# load object and continue QC: doublet removal
+
+```{r}
+load(file = paste0(outdir,"whole_V1.Robj"))
+```
+
+check ncounts for possible doublets
+
+```{r}
+ggplot(whole@meta.data,aes(x = log10_nCount_ADT))+
+  geom_histogram()+
+  facet_wrap(~miQC.keep,scales = "free",ncol = 1)
+ggplot(whole@meta.data,aes(x = nCount_ADT))+
+  geom_histogram()+
+  facet_wrap(~miQC.keep,scales = "free",ncol = 1)
+ggplot(whole@meta.data,aes(x = nCount_RNA))+
+  geom_histogram()+
+  facet_wrap(~miQC.keep,scales = "free",ncol = 1)
+```
+
+check distribution of the tails:
+1. check tails for high nCount_RNA
+
+```{r}
+ggplot(whole@meta.data %>% filter(nCount_RNA > 25000),aes(x = nCount_ADT))+
+  geom_histogram() # + facet_wrap(~orig.ident,scales = "free",ncol = 1)
+ggplot(whole@meta.data %>% filter(nCount_RNA > 25000),aes(x = nCount_RNA))+
+  geom_histogram() #+ facet_wrap(~orig.ident,scales = "free",ncol = 1)
+```
+
+2. check the tails for high nCount_ADT
+
+```{r}
+ggplot(whole@meta.data %>% filter(nCount_ADT > 7500),aes(x = nCount_ADT))+
+  geom_histogram() # +facet_wrap(~orig.ident,scales = "free",ncol = 1)
+ggplot(whole@meta.data %>% filter(nCount_ADT > 7500),aes(x = nCount_RNA))+
+  geom_histogram()# + facet_wrap(~orig.ident,scales = "free",ncol = 1)
+```
+check number of cells exceeding some threshold and make plots on the percentage of cells
+
+```{r}
+whole@meta.data <- whole@meta.data %>% mutate(
+  nCount_RNA_level = case_when(
+    nCount_RNA > 25000 ~ ">25000",
+    .default = "<=25000"
+  ),
+  nCount_ADT_level = case_when(
+    nCount_ADT > 7500 ~ ">7500",
+    .default = "<=7500"
+))
+```
+
+```{r}
+table(whole$nCount_RNA_level)
+table(whole$nCount_ADT_level)
+```
+
+```{r}
+table(whole@meta.data[,c("nCount_RNA_level","nCount_ADT_level")])
+```
+So there are 20 double-high and 65471 double-low.
+
+```{r}
+whole@meta.data <- whole@meta.data %>% mutate(
+  doublet_guess = case_when(
+    nCount_ADT > 7500 | nCount_RNA > 25000 ~ "doublet-like", # use OR such that only both low are considered non-doub-like
+    .default = "normal-like"
+  )
+)
+```
+
+```{r}
+qc_prop <- whole@meta.data %>% group_by(orig.ident,doublet_guess) %>% 
+                            summarise(n_cat = n()) %>% 
+                            ungroup() %>% 
+                            group_by(orig.ident) %>%
+                            mutate(prop_by_sample = n_cat*100/sum(n_cat))
+```
+
+```{r}
+ggplot(qc_prop)+
+  geom_bar(aes(x = orig.ident, y = prop_by_sample, fill = doublet_guess),stat = "identity",position = "stack")
+```
+Since the proportion of the cells seems fine, I'll use `nCount_ADT > 7500 | nCount_RNA > 25000` as the threshold and store as whole_V1p1.
+
+```{r}
+whole <- subset(whole, subset = doublet_guess == "normal-like")
+```
+
+```{r eval = FALSE}
+save(whole,file = paste0(outdir,"whole_V1p1.Robj"))
+```
+
+## process V1p1 whole object and check ADT again
+
+```{r}
+load(paste0(outdir,"whole_V1p1.Robj"))
+```
+
+```{r}
+# No need to normalize again since normalization is cell-specific; merging may remove the data layer, so normalization may be required after merging
+
+# whole <- NormalizeData(object = whole, normalization.method = "LogNormalize", scale.factor = 10000)
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(whole) <-  VariableFeatures(whole) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(whole))]
+VariableFeaturePlot(whole)
+
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+```
+
+```{r}
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20) # use harmony to correct for batch effect
+whole <- RunUMAP(whole,dims = 1:30,reduction = "harmony") # use harmony embedding for downstream analysis
+whole <- RunTSNE(whole,dims = 1:30,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+whole <- JoinLayers(whole)
+```
+
+```{r}
+DimPlot(whole, reduction = "umap",group.by = "orig.ident",shuffle = T)
+DimPlot(whole, reduction = "umap",group.by = "RNA_snn_res.0.1") # now the umap looks a little bit better
+```
+
+
+process ADT
+
+```{r}
+DefaultAssay(whole) <- "ADT"
+whole <- NormalizeData(whole, normalization.method = "CLR", margin = 1) # normalize across features
+whole <- JoinLayers(whole)
+DefaultAssay(whole) <- "RNA" # switch back to RNA 
+```
+```{r}
+DefaultAssay(whole) <- "ADT"
+p1 <- FeaturePlot(whole, "CD3", cols = c("lightgrey", "red2"),order = T,slot = "data") + ggtitle("CD3 protein")
+DefaultAssay(whole) <- "RNA"
+p2 <- FeaturePlot(whole, "Cd3e") + ggtitle("CD3 RNA")
+
+p1 | p2
+```
+
+```{r}
+DefaultAssay(whole) <- "ADT"
+p1 <- FeaturePlot(whole, "NK1.1", cols = c("lightgrey", "red2"),order = T) + ggtitle("NK1.1 protein")
+DefaultAssay(whole) <- "RNA"
+p2 <- FeaturePlot(whole, "Ncr1") + ggtitle("NK1.1 RNA")
+
+p1 | p2
+```
+```{r}
+ADT_mat <- as.data.frame(t(whole@assays$ADT@layers$data))
+colnames(ADT_mat) <- rownames(whole[["ADT"]])
+rownames(ADT_mat) <- colnames(whole[["ADT"]])
+```
+
+```{r}
+ggplot(ADT_mat) +
+  geom_histogram(aes(x = CD3))
+ggplot(ADT_mat) +
+  geom_histogram(aes(x = NK1.1))
+ggplot(ADT_mat) +
+  geom_histogram(aes(x = CCR7))
+```
+```{r}
+ggplot(whole@meta.data,aes(x = log10_nCount_ADT))+
+  geom_histogram()
+ggplot(whole@meta.data,aes(x = nCount_ADT))+
+  geom_histogram()
+ggplot(whole@meta.data,aes(x = nCount_RNA))+
+  geom_histogram()
+```
+
+Maybe I need more trimming :)))))))) The distribution has to be somewhat bimodal for ADT to work
+
+```{r}
+whole@meta.data <- whole@meta.data %>% mutate(
+  nCount_RNA_level = case_when(
+    nCount_RNA > 25000 ~ ">25000",
+    .default = "<=25000"
+  ),
+  nCount_ADT_level = case_when(
+    nCount_ADT > 4000 ~ ">4000",
+    .default = "<=4000"
+  ),
+doublet_guess = case_when(
+    nCount_ADT > 4000 | nCount_RNA > 25000 ~ "doublet-like", # use OR such that only both low are considered non-doub-like
+    .default = "normal-like"
+  ))
+```
+
+```{r}
+table(whole@meta.data[,c("nCount_RNA_level","nCount_ADT_level")])
+```
+
+So I'll remove additional 470 cells
+
+```{r}
+qc_prop <- whole@meta.data %>% group_by(orig.ident,doublet_guess) %>% 
+                            summarise(n_cat = n()) %>% 
+                            ungroup() %>% 
+                            group_by(orig.ident) %>%
+                            mutate(prop_by_sample = n_cat*100/sum(n_cat))
+```
+
+```{r}
+ggplot(qc_prop)+
+  geom_bar(aes(x = orig.ident, y = prop_by_sample, fill = doublet_guess),stat = "identity",position = "stack")
+```
+
+Note that FE4.02 will have many cells removed
+
+```{r}
+table(whole$orig.ident)
+```
+
+
+```{r}
+whole <- subset(whole, subset = doublet_guess == "normal-like")
+```
+
+```{r}
+save(whole,file = paste0(outdir,"whole_V1p2.Robj"))
+```
+
+Ideally, you can perform sample-wise outlier detection to decide which cells to remove.
+
+
+## process V1p2
+
+```{r}
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(whole) <-  VariableFeatures(whole) [!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(whole))]
+VariableFeaturePlot(whole)
+
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20) # use harmony to correct for batch effect
+whole <- RunUMAP(whole,dims = 1:30,reduction = "harmony") # use harmony embedding for downstream analysis
+whole <- RunTSNE(whole,dims = 1:30,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+whole <- JoinLayers(whole)
+```
+```{r}
+DimPlot(whole, reduction = "umap",group.by = "orig.ident",shuffle = T)
+DimPlot(whole, reduction = "umap",group.by = "RNA_snn_res.0.1") # now the umap looks a little bit better
+```
+```{r}
+# check for possible immune cell types
+# erythrocytes and platelets are rare but maybe also detected
+DotPlot(whole,features = c("Mki67","Ptprc","Cd3e","Cd8a","Cd4","Foxp3","Gata3","Rorc","Tcf7","Tox","Cd19","Flt3","Cd44","Ncam1","Xcr1","Ncr1","Siglech","S100a8","Mpo","Ccr2","Fcer1a","Fcer2a","Hbb-bs","Alas2","Pf4"),group.by = "RNA_snn_res.0.1",cluster.idents = T)+RotatedAxis()
+# some of the markers are cell-state markers because cells can cluster by cell-states.
+# This is important for ruling out doublet/multiplet clusters
+```
+
+```{r}
+DefaultAssay(whole) <- "ADT"
+whole <- NormalizeData(whole, normalization.method = "CLR", margin = 1) # normalize across features
+
+whole <- JoinLayers(whole)
+DefaultAssay(whole) <- "RNA" # switch back to RNA 
+```
+
+```{r}
+DefaultAssay(whole) <- "ADT"
+p1 <- FeaturePlot(whole, "CD3", cols = c("lightgrey", "red2"),order = T,slot = "data") + ggtitle("CD3 protein")
+DefaultAssay(whole) <- "RNA"
+p2 <- FeaturePlot(whole, "Cd3e") + ggtitle("CD3 RNA")
+
+p1 | p2
+```
+
+
+
+```{r}
+ADT_mat <- as.data.frame(t(whole@assays$ADT@layers$data))
+colnames(ADT_mat) <- rownames(whole[["ADT"]])
+rownames(ADT_mat) <- colnames(whole[["ADT"]])
+```
+
+```{r}
+ggplot(ADT_mat) +
+  geom_histogram(aes(x = CD3))
+ggplot(ADT_mat) +
+  geom_histogram(aes(x = NK1.1))
+ggplot(ADT_mat) +
+  geom_histogram(aes(x = CCR7))
+```
+```{r}
+ggplot(whole@meta.data,aes(x = log10_nCount_ADT))+
+  geom_histogram()
+ggplot(whole@meta.data,aes(x = nCount_ADT))+
+  geom_histogram()
+ggplot(whole@meta.data,aes(x = nCount_RNA))+
+  geom_histogram()
+```
+check cluster levels of ADT 
+
+```{r}
+ADT_agg <- AggregateExpression(whole, assays = "ADT",group.by = "RNA_snn_res.0.5",return.seurat = T)
+```
+
+```{r}
+ADT_mat <- as.data.frame(log10(as.matrix(ADT_agg@assays$ADT@layers$counts)))
+rownames(ADT_mat) <- rownames(ADT_agg)
+colnames(ADT_mat) <- colnames(ADT_agg)
+ADT_mat <- apply(ADT_mat,1,scale)
+```
+
+
+```{r}
+RNA_agg <- AggregateExpression(whole, assays = "RNA",group.by = "RNA_snn_res.0.5",return.seurat = T)
+```
+
+```{r}
+DoHeatmap(RNA_agg,features = c("Mki67","Ptprc","Cd3e","Cd8a","Cd4","Foxp3","Gata3","Rorc","Tcf7","Tox","Cd19","Flt3","Cd44","Ncam1","Xcr1","Ncr1","Siglech","S100a8","Mpo","Ccr2","Fcer1a","Fcer2a","Hbb-bs","Alas2","Pf4"),draw.lines = F)
+```
+```{r}
+DoHeatmap(ADT_agg, features = rownames(ADT_agg), draw.lines = F, slot = "data")
+```
+Then this is not a problem of outliers but something else.
