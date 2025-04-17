@@ -1,0 +1,185 @@
+---
+title: "process_ICB_data"
+output: html_document
+date: "2025-03-27"
+---
+
+```{r}
+library(Seurat)
+library(data.table)
+library(tidyverse)
+```
+
+```{r}
+mat <- read.delim("GSE120575_Sade_Feldman_melanoma_single_cells_TPM_GEO.txt")
+```
+
+```{r}
+colnames(mat)[1:10]
+rownames(mat)[1:10]
+```
+```{r}
+head(mat[16290:16292])
+head(mat[1:10])
+```
+```{r}
+mat_row1 <- mat[1,]
+```
+
+```{r}
+colnames_mat <- colnames(mat)[-1]
+mat <- mat[,-16292] # remove last column
+colnames(mat) <- colnames_mat
+```
+
+```{r}
+rownames_mat <- rownames(mat)[-1]
+mat <- mat[-1,]
+rownames(mat) <- rownames_mat
+```
+
+```{r}
+meta <- readxl::read_excel("GSE120575_patient_ID_meta.xlsx")
+meta <- meta[1:16291,1:7]
+```
+
+
+```{r}
+head(meta)
+```
+
+```{r}
+mat <- as.sparse(mat)
+```
+
+the matrix is normalized data but feed in as raw counts to create the object.
+
+```{r}
+seu <- CreateSeuratObject(counts = mat)
+```
+
+```{r}
+meta <- cbind(seu@meta.data, meta)
+```
+
+```{r}
+seu@meta.data <- meta
+```
+
+```{r}
+seu@assays$RNA@layers$data <- mat
+```
+
+```{r}
+seu <- PercentageFeatureSet(seu, pattern = "^MT-|^mt-|^Mt-",col.name = "percent.mt")
+```
+
+```{r}
+hist(seu$percent.mt)
+```
+
+
+```{r}
+seu[["RNA"]]$data <- NULL
+seu[["RNA"]]$data <- log1p(seu[["RNA"]]$counts)
+```
+
+```{r}
+# seu <- NormalizeData(object = seu, normalization.method = "LogNormalize", scale.factor = 10000)
+# do not run normalization over the TPM data
+
+seu <- FindVariableFeatures(object = seu, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(seu) <-  VariableFeatures(seu) [!grepl("^TRA|^TRB|^IGH|^IGK", VariableFeatures(seu))]
+VariableFeaturePlot(seu)
+
+seu <- ScaleData(object = seu, features = VariableFeatures(object = seu), vars.to.regress = c("nCount_RNA", "percent.mt")) 
+
+seu <- RunPCA(object = seu,
+                features =  VariableFeatures(object = seu),
+                dims = 1:50)
+gc()
+ElbowPlot(seu,ndims = 50)
+
+seu <- RunHarmony(object = seu, group.by.vars = c("orig.ident"), max.iter.harmony = 20) # use harmony to correct for batch effect
+```
+
+```{r}
+# seu <- RunUMAP(seu,dims = 1:10,reduction = "harmony") # use harmony embedding for downstream analysis
+seu <- RunTSNE(seu,dims = 1:10,reduction = "pca",perplexity = 30)
+
+seu <- FindNeighbors(seu, dims = 1:10,reduction = "pca")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  seu <- FindClusters(object = seu, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+seu <- JoinLayers(seu) # required for seurat V5
+```
+
+```{r}
+table(seu$`characteristics: response`)
+table(seu$`characteristics: therapy`)
+```
+
+
+```{r}
+DimPlot(seu, group.by = "characteristics: response",reduction = "tsne")
+DimPlot(seu, group.by = "characteristics: therapy",reduction = "tsne")
+DimPlot(seu, group.by = "RNA_snn_res.0.1",reduction = "tsne")
+```
+
+```{r}
+VlnPlot(seu, features = "percent.mt",group.by = "RNA_snn_res.0.3")
+VlnPlot(seu, features = "nCount_RNA",group.by = "RNA_snn_res.0.3")
+VlnPlot(seu, features = "nFeature_RNA",group.by = "RNA_snn_res.0.3")
+```
+
+```{r}
+hist(log2(seu$nCount_RNA+1))
+hist(log2(seu$nFeature_RNA+1))
+```
+
+```{r}
+pub_cluster <- readxl::read_excel("1-s2.0-S0092867418313941-mmc1.xlsx", sheet = "Cluster annotation-Fig1B-C")
+```
+
+```{r}
+meta <- cbind(seu@meta.data,pub_cluster)
+colnames(meta)[24] <- "pub_cluster"
+```
+
+```{r}
+seu@meta.data <- meta
+```
+
+```{r}
+DimPlot(seu, group.by = "pub_cluster",reduction = "tsne")
+```
+
+```{r}
+seu@meta.data <- seu@meta.data %>% mutate(
+  pub_annotation = case_match(
+    as.character(pub_cluster),
+    "1" ~ "G1- B cells",
+    "2" ~ "G2- Plasma cells",
+    "3" ~ "G3- Monocytes/Macrophages",
+    "4" ~ "G4- Dendritic cells",
+    "5" ~ "G5- Lymphocytes",
+    "6" ~ "G6- Exhausted CD8 T cells",
+    "7" ~ "G7- Regulatory T cells",
+    "8" ~ "G8- Cytotoxicity (Lymphocytes)",
+    "9" ~ "G9- Exhausted/HS CD8 T cells",
+    "10" ~ "G10- Memory T cells",
+    "11" ~ "G11- Lymphocytes exhausted/cell-cycle"
+  )
+)
+```
+
+```{r}
+DimPlot(seu, group.by = "pub_annotation",reduction = "tsne")
+```
+
+```{r}
+saveRDS(seu, file = "GSE120575_ICB_response_data_recovered.RDS")
+```
+
+
