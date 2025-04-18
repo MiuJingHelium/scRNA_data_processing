@@ -1,0 +1,164 @@
+---
+title: "1-process_SC-EC-atlas"
+output: html_document
+date: "2025-04-17"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(miQC)
+library(SeuratWrappers)
+library(DoubletFinder)
+library(scater)
+library(harmony)
+library(RColorBrewer)
+```
+
+```{r}
+indir <- "E-MTAB-8077/E-MTAB-8077/"
+outdir <- "E-MTAB-8077/data-analysis/"
+if(!dir.exists(outdir))dir.create(outdir)
+```
+
+```{r}
+samples <- unlist(lapply(list.files(indir), function(x){
+   unlist(strsplit(unlist(strsplit(x, split = "_"))[4], split = "[.]"))[1]
+}))
+files <- list.files(indir, full.names = T)
+```
+
+```{r}
+test <- read.delim(files[1])
+features <- unname(test[,1])
+test <- test[,-1]
+rownames(test) <- features
+```
+
+```{r}
+test <- as.sparse(test)
+```
+
+```{r}
+mtx_list <- lapply(files,function(x){
+  mat <- read.delim(x)
+  features <- unname(mat[,1])
+  mat <- mat[,-1] # remove features from column 1
+  rownames(mat) <- features # rename rows using 
+  mtx = as.sparse(mat) 
+  Seu <- CreateSeuratObject(mtx)
+  Seu
+  
+})
+names(mtx_list) <- samples
+```
+
+
+```{r}
+# 
+mtx_list <- lapply(mtx_list, function(x){
+  x[["percent.mt"]] <- PercentageFeatureSet(object = x, pattern = "^mt|^MT|^Mt")
+  x$log10_nCount_RNA <- log10(x$nCount_RNA+1) # add a pseudcount offset to prevent log10(0)
+  x$log10_nFeature_RNA <- log10(x$nFeature_RNA+1)
+  x$percent.ribo <- PercentageFeatureSet(x,pattern="^RP[LS]")
+  x[["high_mito"]] <- isOutlier(x$percent.mt, type="higher", min.diff=0.5)
+  
+  x@meta.data <- x@meta.data %>% mutate(
+  mitoQC = case_when(
+    high_mito ~ "high_mito",
+    .default = "normal"
+  ))
+  
+  x <- RunMiQC(x, percent.mt = "percent.mt", nFeature_RNA = "nFeature_RNA", posterior.cutoff = 0.8,
+               model.slot = "flexmix_model")
+  x
+})
+```
+
+```{r}
+EC_integrated <- merge(x = mtx_list[[1]], y = unlist(mtx_list)[2:length(mtx_list)])
+```
+
+```{r}
+EC_integrated <- JoinLayers(EC_integrated)
+```
+
+```{r}
+rownames(EC_integrated@meta.data)[1:5]
+EC_integrated$barcodes <- rownames(EC_integrated@meta.data)
+EC_integrated$orig.ident <- unlist(lapply(EC_integrated$barcodes, function(x){unlist(strsplit(x, split = "_"))[2]}))
+```
+
+```{r}
+VlnPlot(EC_integrated,features = c("log10_nFeature_RNA","log10_nCount_RNA"),group.by = "orig.ident",alpha = 0.1,
+        split.by = "miQC.keep") 
+```
+
+```{r}
+ggplot(EC_integrated@meta.data,aes(x = log10_nCount_RNA, y = percent.mt, color = miQC.keep))+
+  facet_wrap(~orig.ident)+
+  geom_point()+
+  scale_color_manual(values = c("keep" = "darkblue","discard" = "red3"))+
+  theme_classic()
+```
+
+
+```{r}
+VlnPlot(EC_integrated,features = c("percent.mt","percent.ribo"),group.by = "orig.ident",alpha = 0.1)
+```
+
+```{r}
+saveRDS(EC_integrated, file = paste0(outdir,"EC_atlas_prefilter.RDS"))
+```
+
+```{r}
+EC_integrated <- subset(EC_integrated, subset = miQC.keep == "keep")
+```
+
+
+```{r}
+table(EC_integrated$miQC.keep)
+```
+
+```{r}
+EC_integrated <- NormalizeData(object = EC_integrated, normalization.method = "LogNormalize", scale.factor = 10000)
+EC_integrated <- FindVariableFeatures(object = EC_integrated, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+#VariableFeatures(EC_integrated) <-  VariableFeatures(EC_integrated)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(EC_integrated))]
+VariableFeaturePlot(EC_integrated)
+EC_integrated <- ScaleData(object = EC_integrated, features = VariableFeatures(object = EC_integrated), vars.to.regress = c("nCount_RNA", "percent.mt"))
+EC_integrated <- RunPCA(object = EC_integrated,
+                features =  VariableFeatures(object = EC_integrated),
+                dims = 1:50)
+gc()
+ElbowPlot(EC_integrated,ndims = 50)
+```
+
+```{r}
+EC_integrated <- RunHarmony(object = EC_integrated, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+EC_integrated <- RunUMAP(EC_integrated,dims = 1:30,reduction = "harmony")
+EC_integrated <- RunTSNE(EC_integrated,dims = 1:30,reduction = "harmony")
+
+EC_integrated <- FindNeighbors(EC_integrated, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  EC_integrated <- FindClusters(object = EC_integrated, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+EC_integrated <- JoinLayers(EC_integrated)
+```
+
+```{r}
+DimPlot(EC_integrated, group.by = "orig.ident",reduction = "umap")+scale_color_manual(values = colorRampPalette(brewer.pal(10, "Set1"))(10))
+```
+```{r}
+FeaturePlot(EC_integrated, features = "Myct1")
+```
+
+```{r}
+saveRDS(EC_integrated, file = paste0(outdir,"EC_atlas_filtered.RDS"))
+```
+
+
+```{r}
+VlnPlot(EC_integrated, features = "Myct1", group.by = "orig.ident")
+```
+
