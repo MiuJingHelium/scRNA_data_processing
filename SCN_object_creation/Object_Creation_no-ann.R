@@ -16,6 +16,8 @@ token <- args[2]
 obj_name <- args[3]
 input.obj <- args[4]
 
+dat <- readRDS(input.obj)
+
 # if counts are transformed using soupx, then rounding is needed.
 
 dat@assays$RNA@layers$counts <-  ceiling(dat@assays$RNA@layers$counts) 
