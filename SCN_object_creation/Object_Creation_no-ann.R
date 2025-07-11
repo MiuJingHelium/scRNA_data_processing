@@ -11,10 +11,10 @@ library(harmony)
 #library(argparse)
 
 args <- commandArgs(trailingOnly = T)
-input.obj <- args[1]
-token <- args[3]
-outdir <- args[2]
-dat <- readRDS(input.obj)
+outdir <- args[1]
+token <- args[2]
+obj_name <- args[3]
+input.obj <- args[4]
 
 # if counts are transformed using soupx, then rounding is needed.
 
